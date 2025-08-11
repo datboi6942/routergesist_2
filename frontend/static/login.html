@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Login – Router Geist 2</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <script defer src="/static/login.js"></script>
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self';" />
+</head>
+<body>
+  <main class="login-container">
+    <section class="card">
+      <h2>Admin Login</h2>
+      <div class="row" style="flex-direction:column;align-items:stretch;gap:10px;">
+        <input id="user" placeholder="Username" autocomplete="username" />
+        <input id="pass" placeholder="Password" type="password" autocomplete="current-password" />
+        <button id="loginBtn">Login</button>
+        <div id="msg" class="muted"></div>
+        <details><summary class="muted">First time setup?</summary>
+          <div class="row col gap-8">
+            <input id="buser" placeholder="New admin username" />
+            <input id="bpass" placeholder="New admin password" type="password" />
+            <button id="bootstrapBtn">Create Admin</button>
+            <div id="bmsg" class="muted"></div>
+          </div>
+        </details>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
+
+

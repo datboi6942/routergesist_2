@@ -1,0 +1,86 @@
+:root{
+  --bg:#0f1115; --fg:#e6e6e6; --muted:#9aa0a6; --card:#171a21; --border:#2a2f3a; --accent:#5b9cff; --danger:#ff4d4d
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; font:16px/1.5 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+  color:var(--fg); background:var(--bg);
+}
+header,footer{padding:16px 24px; border-bottom:1px solid var(--border)}
+footer{border-top:1px solid var(--border); border-bottom:none; color:var(--muted)}
+h1{margin:0;font-weight:700}
+/* Tabs */
+.tabs{display:flex; gap:8px; padding:0 16px; border-bottom:1px solid var(--border)}
+.tab{appearance:none; padding:10px 14px; background:#1a1f2a; color:var(--fg); border:1px solid var(--border); border-bottom:none; border-top-left-radius:8px; border-top-right-radius:8px; cursor:pointer}
+.tab.active{background:#22283a}
+
+main{padding:0}
+.tab-pane{display:none; gap:16px; padding:16px; grid-template-columns:repeat(auto-fit, minmax(340px,1fr))}
+.tab-pane.active{display:grid}
+.card{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px}
+.card h2{margin-top:0}
+.muted{color:var(--muted)}
+table{width:100%; border-collapse:collapse; table-layout:auto}
+th,td{padding:8px; border-bottom:1px solid var(--border); text-align:left}
+.badge{display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px; border:1px solid var(--border)}
+.badge.ap{background:#1f2d1f; color:#9cff9c}
+.badge.wan{background:#1f2230; color:#a3c4ff}
+.row{display:flex; gap:8px; align-items:center}
+.col{display:flex; flex-direction:column; align-items:stretch}
+.gap-8{gap:8px}
+.mt-10{margin-top:10px}
+.justify-between{justify-content:space-between}
+.m-0{margin:0}
+.flex-1{flex:1}
+.pre-wrap{white-space:pre-wrap}
+.row.wrap{flex-wrap:wrap}
+.row.wrap input{flex:1; min-width:180px}
+.row.wrap button{white-space:nowrap}
+button{appearance:none; border:1px solid var(--border); background:#222633; color:var(--fg); padding:10px 14px; border-radius:8px; cursor:pointer}
+button:hover{background:#2a2f40}
+button.nuke{border-color:var(--danger); color:#fff; background:#2b1515}
+button.nuke:hover{background:#3a1616}
+input{background:#0e131b; color:var(--fg); border:1px solid var(--border); padding:8px 10px; border-radius:8px}
+.field{display:flex; gap:8px; align-items:center; margin:6px 0}
+.field label{width:180px; color:var(--muted)}
+.field input,.field select{flex:1}
+.danger{border-color:#3a1616}
+
+/* Modal utility */
+#modal{position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(0,0,0,.6)}
+#modal.open{display:flex}
+#modal .modal-card{background:#171a21;border:1px solid var(--border);border-radius:12px;max-width:720px;width:90%;padding:16px}
+#modal pre{color:var(--fg); background:#0f1115; border:1px solid var(--border); padding:12px; border-radius:8px; max-height:60vh; overflow:auto}
+
+/* Login page */
+.login-container{max-width:420px;margin:80px auto}
+
+/* Interface table layout fixes */
+.iface-table{ table-layout:fixed }
+.iface-table th, .iface-table td{ vertical-align:middle }
+.iface-table th:nth-child(1), .iface-table td:nth-child(1){ width: 22%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.iface-table th:nth-child(2), .iface-table td:nth-child(2){ width: 10% }
+.iface-table th:nth-child(3), .iface-table td:nth-child(3){ width: 10% }
+.iface-table th:nth-child(4), .iface-table td:nth-child(4){ width: 18%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
+.iface-table th:nth-child(5), .iface-table td:nth-child(5){ width: 10% }
+.iface-table td:last-child{ white-space:nowrap; width:150px }
+.iface-table .table-actions{ display:flex; gap:8px; justify-content:flex-end }
+.iface-table .table-actions button{ margin-right:0; }
+.iface-table .table-actions button:last-child{ margin-right:0; }
+
+button.small{ padding:6px 10px; font-size:12px }
+button.tiny{ padding:4px 8px; font-size:12px }
+
+@media (max-width: 1200px){
+  .iface-table td:last-child{ width:140px; }
+  button.small{ padding:6px 8px; font-size:12px }
+}
+
+@media (max-width: 900px){
+  .iface-table .table-actions{ justify-content:flex-start; flex-wrap:wrap }
+  .iface-table td:last-child{ width:150px }
+}
+
+
+

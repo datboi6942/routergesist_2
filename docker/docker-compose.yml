@@ -1,0 +1,27 @@
+version: "3.8"
+services:
+  routergeist:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      args:
+        PY_VERSION: "3.11"
+    image: routergeist:dev
+    container_name: routergeist_dev
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8080
+      - APP_DATA_DIR=/data
+      - LOG_LEVEL=INFO
+      # Set OPENAI_API_KEY here for dev if desired
+    volumes:
+      - ../backend:/app/backend:ro
+      - ../frontend:/app/frontend:ro
+      - ./data:/data
+    network_mode: host
+    # For interface scan tools inside container
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    restart: unless-stopped
+
