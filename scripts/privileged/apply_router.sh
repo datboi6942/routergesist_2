@@ -59,6 +59,17 @@ table ip nat {
 NFT
 nft -f /tmp/routergeist.nft || true
 
+# 3b) Lock down admin panel to AP network only
+# Determine admin port (default 8080)
+ADMIN_PORT=$(jq -r '.admin.port' "$CFG_JSON" 2>/dev/null || echo "")
+if [[ -z "$ADMIN_PORT" || "$ADMIN_PORT" == "null" ]]; then ADMIN_PORT=8080; fi
+# Always allow loopback traffic
+nft add rule inet filter input iif lo accept || true
+# Allow admin access only from the AP/LAN interface
+nft add rule inet filter input iif "$LAN_EDGE_IF" tcp dport $ADMIN_PORT accept || true
+# Drop admin access from any other interface (e.g., WAN)
+nft add rule inet filter input tcp dport $ADMIN_PORT drop || true
+
 # 4) Masquerade from LAN to WAN
 nft add rule ip nat postrouting oif "$WAN_IF" masquerade || true
 
@@ -145,9 +156,8 @@ wmm_ac_vi_aifs=2
 wmm_ac_vo_aifs=2
 wpa=2
 wpa_passphrase=$PSK
-# WPA2-PSK only for maximum driver compatibility
+# WPA2-PSK (RSN) with AES/CCMP only for modern client compatibility (iOS/Android)
 wpa_key_mgmt=WPA-PSK
-wpa_pairwise=CCMP
 rsn_pairwise=CCMP
 auth_algs=1
 ieee80211w=0

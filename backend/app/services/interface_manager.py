@@ -31,6 +31,10 @@ class InterfaceManager:
         self._task: Optional[asyncio.Task] = None
         self._stop_event = asyncio.Event()
         self._interfaces: Dict[str, InterfaceInfo] = {}
+        # Persist roles across scans to avoid repeated re-assignment
+        self._roles: Dict[str, str] = {}
+        # Track which iface we last applied AP stack for, to avoid flapping
+        self._ap_applied_iface: Optional[str] = None
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -64,6 +68,7 @@ class InterfaceManager:
             if role not in ("AP", "WAN"):
                 raise ValueError("Invalid role; must be 'AP' or 'WAN'")
             info.role = role
+            self._roles[interface_name] = role
         # Apply role out-of-lock
         if role == "WAN":
             self._bring_up_wan(interface_name)
@@ -87,11 +92,6 @@ class InterfaceManager:
                     await self.assign_role(iface.name, "WAN")
                 else:
                     await self.assign_role(iface.name, "AP")
-            # Ensure AP stack is up on startup for single Wi‑Fi NIC case
-            try:
-                apply_router_config()
-            except Exception as _:
-                pass
             return
 
         # Two or more wireless NICs
@@ -132,7 +132,7 @@ class InterfaceManager:
                 is_wireless=is_wireless,
                 mac_address=mac,
                 ipv4_addresses=ipv4s,
-                role=None,
+                role=self._roles.get(name),
             )
             result.append(info)
         return result
@@ -165,9 +165,12 @@ class InterfaceManager:
                 print(f"[interface_manager] WAN connect error: {exc}")
 
     def _bring_up_ap(self, iface: str) -> None:
-        # Delegate to systemd-managed apply script to ensure single source of truth
+        # Delegate to systemd-managed apply script once to avoid flapping
+        if self._ap_applied_iface == iface:
+            return
         try:
             apply_router_config()
+            self._ap_applied_iface = iface
             print(f"[interface_manager] ensured AP via apply_router_config on {iface}")
         except Exception as exc:  # noqa: BLE001
             print(f"[interface_manager] AP ensure error: {exc}")

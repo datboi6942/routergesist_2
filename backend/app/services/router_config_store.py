@@ -8,6 +8,9 @@ from ..utils.paths import get_app_data_dir
 
 
 DEFAULT_CONFIG: Dict[str, Any] = {
+    "admin": {
+        "port": 8080,
+    },
     "lan": {
         "interface": "eth0",
         "cidr": "192.168.5.1/24",
