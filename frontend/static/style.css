@@ -29,6 +29,7 @@ th,td{padding:8px; border-bottom:1px solid var(--border); text-align:left}
 .row{display:flex; gap:8px; align-items:center}
 .col{display:flex; flex-direction:column; align-items:stretch}
 .gap-8{gap:8px}
+.gap-10{gap:10px}
 .mt-10{margin-top:10px}
 .justify-between{justify-content:space-between}
 .m-0{margin:0}
