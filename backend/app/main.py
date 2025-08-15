@@ -16,6 +16,7 @@ from .services.stats_service import stats_service
 from .services.dns_monitor import dns_monitor
 from .services.suricata_monitor import suricata_monitor
 from .services.flow_monitor import flow_monitor
+from .services.activity_monitor import activity_monitor
 
 
 app = FastAPI(title="Router Geist 2")
@@ -36,6 +37,7 @@ async def on_startup() -> None:
     await dns_monitor.start()
     await suricata_monitor.start()
     await flow_monitor.start()
+    await activity_monitor.start()
     # Auto-apply router config at boot to bring up AP and NAT
     try:
         from .services.router_apply import apply_router_config
@@ -51,6 +53,7 @@ async def on_shutdown() -> None:
     await dns_monitor.stop()
     await suricata_monitor.stop()
     await flow_monitor.stop()
+    await activity_monitor.stop()
 
 
 app.include_router(interfaces_router, prefix="/api/interfaces", tags=["interfaces"])

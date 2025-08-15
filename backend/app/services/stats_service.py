@@ -15,7 +15,8 @@ class StatsService:
         self._lock = asyncio.Lock()
         # per-nic history: list of (ts, rx_bytes, tx_bytes per second)
         self._history: Dict[str, Deque[Tuple[float, float, float]]] = {}
-        self._window_seconds = 5 * 60
+        # Keep 1 hour of history for long-horizon charts
+        self._window_seconds = 60 * 60
 
     async def start(self) -> None:
         if self._task and not self._task.done():

@@ -88,6 +88,7 @@ async function init(){
   await loadConnections();
   await loadTopDomainsByClient();
   await loadNewDomains();
+  await loadActivity();
   await refreshBlocklist();
   setInterval(()=>isTabActive('interfaces')&&loadInterfaces(), 5000);
   setInterval(()=>isTabActive('security')&&loadThreats(), 7000);
@@ -98,6 +99,7 @@ async function init(){
   setInterval(()=>isTabActive('analytics')&&loadConnections(), 12000);
   setInterval(()=>isTabActive('analytics')&&loadTopDomainsByClient(), 12000);
   setInterval(()=>isTabActive('analytics')&&loadNewDomains(), 30000);
+  setInterval(()=>isTabActive('analytics')&&loadActivity(), 2000);
   setInterval(()=>isTabActive('security')&&refreshBlocklist(), 8000);
   setupTabs();
   // Bind buttons to avoid inline handlers (CSP safe)
@@ -120,6 +122,25 @@ async function loadOpenAIState(){
     const s = await api('/api/settings/openai');
     const stateEl = document.getElementById('openaiState');
     if(stateEl) stateEl.textContent = s.configured ? 'Configured' : 'Not configured';
+  }catch{}
+}
+
+async function loadActivity(){
+  try{
+    const data = await api('/api/stats/activity');
+    const el = document.getElementById('activity'); if(!el) return;
+    el.innerHTML='';
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Client</th><th>Activity</th><th>Flows</th><th>Signals</th><th>Top Domains</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    (data.items||[]).forEach(item=>{
+      const tr = document.createElement('tr');
+      const sig = `udp443:${item.udp443||0} tcp443:${item.tcp443||0}`;
+      const doms = (item.top_domains||[]).join(', ');
+      tr.innerHTML = `<td>${item.ip}</td><td>${item.activity}</td><td>${item.flows}</td><td>${sig}</td><td>${doms}</td>`;
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); el.appendChild(table);
   }catch{}
 }
 
@@ -225,59 +246,152 @@ init();
 // Smooth animated traffic chart (no external deps)
 let __traffic = {buffer: [], nic: null, lastFetch: 0};
 async function startTrafficChart(){
-  const cvs = document.getElementById('trafficChart'); if(!cvs) return;
-  const ctx = cvs.getContext('2d');
+  const single = document.getElementById('trafficChart');
+  const cvsWan = document.getElementById('trafficChartWan');
+  const cvsLan = document.getElementById('trafficChartLan');
+  const wanNicName = document.getElementById('wanNicName');
+  const lanNicName = document.getElementById('lanNicName');
+  const isDual = !!(cvsWan && cvsLan);
+  if(!single && !isDual) return;
+  const ctxSingle = single ? single.getContext('2d') : null;
+  const ctxWan = cvsWan ? cvsWan.getContext('2d') : null;
+  const ctxLan = cvsLan ? cvsLan.getContext('2d') : null;
+  // ensure device pixel ratio scaling for crisp lines
+  function scaleCanvas(cvs, ctx){
+    if(!cvs || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = cvs.clientWidth || 600;
+    const cssH = cvs.clientHeight || 220;
+    if(cvs.width !== Math.floor(cssW*dpr)){
+      cvs.width = Math.floor(cssW*dpr);
+      cvs.height = Math.floor(cssH*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+  }
+  // optional NIC selector (legacy single-chart UI)
+  const nicSel = document.getElementById('trafficNic');
   async function fetchData(){
     try{
-      const data = await api('/api/stats/traffic');
-      const pernic = data.pernic || {}; const nics = Object.keys(pernic);
+      const [tData, sData] = await Promise.all([
+        api('/api/stats/traffic'),
+        api('/api/stats/summary')
+      ]);
+      const pernic = tData.pernic || {}; const nics = Object.keys(pernic);
       if(nics.length===0) return;
-      if(!__traffic.nic) __traffic.nic = nics[0];
+      // Prefer roles from summary when available
+      const perSummary = (sData && sData.pernic) ? sData.pernic : {};
+      let roleWan = null, roleLan = null;
+      Object.keys(perSummary).forEach(n=>{
+        const r = perSummary[n] && perSummary[n].role; if(r==='WAN') roleWan = n; if(r==='LAN') roleLan = n;
+      });
+      // Build candidate NICs (exclude loopback, docker, veth, bridges, tunnels)
+      const isExcluded = (name)=> /^(lo|docker\d*|br-|veth|virbr|tun|tap|wg)/.test(name);
+      const candidates = nics.filter(n=>!isExcluded(n));
+      // If dual charts, pick WAN/LAN by roles first, then heuristics; avoid selecting the same NIC twice
+      if(isDual){
+        let bestWan=roleWan && candidates.includes(roleWan) ? roleWan : null;
+        let bestLan=roleLan && candidates.includes(roleLan) ? roleLan : null;
+        let bestWanVal=-1, bestLanVal=-1;
+        const endTs = Date.now()/1000; const startTs = endTs - 120;
+        const nicList = candidates.length ? candidates : nics;
+        for(const nic of nicList){
+          const pts = pernic[nic] || [];
+          const recent = pts.filter(p=>p[0] >= startTs);
+          if(recent.length){
+            const avgRx = recent.reduce((a,b)=>a+b[1],0)/recent.length;
+            const avgTx = recent.reduce((a,b)=>a+b[2],0)/recent.length;
+            if(!bestWan && avgRx > bestWanVal){ bestWanVal = avgRx; bestWan = nic; }
+            // Prefer AP-like names for LAN/AP if possible
+            const preferAp = /^wl|^uap0/.test(nic) ? 1 : 0;
+            const score = avgTx + preferAp * avgTx; // bias wireless
+            if((!bestLan && (nic !== bestWan)) || (nic !== bestWan && score > bestLanVal)){
+              bestLanVal = score; bestLan = nic;
+            }
+          }
+        }
+        __traffic.nic = bestWan || (candidates[0] || nics[0]);
+        const lanPick = bestLan && bestLan !== __traffic.nic ? bestLan : ((candidates.find(n=>n!==__traffic.nic)) || __traffic.nic);
+        __traffic.buffer = (pernic[__traffic.nic] || []).slice(-7200);
+        __traffic.bufferLan = (pernic[lanPick] || []).slice(-7200);
+        if(wanNicName) wanNicName.textContent = __traffic.nic;
+        if(lanNicName) lanNicName.textContent = lanPick;
+        __traffic.lanNic = lanPick;
+        __traffic.lastFetch = performance.now();
+        return;
+      }
+      // Single chart path: populate selector on first load
+      if(nicSel && !nicSel.dataset.filled){
+        nicSel.innerHTML = '';
+        nics.forEach(n=>{ const op=document.createElement('option'); op.value=n; op.textContent=n; nicSel.appendChild(op); });
+        nicSel.dataset.filled = '1';
+        nicSel.addEventListener('change', ()=>{ __traffic.nic = nicSel.value; });
+      }
+      if(!__traffic.nic){ __traffic.nic = nicSel && nicSel.value ? nicSel.value : nics[0]; if(nicSel && !nicSel.value) nicSel.value = __traffic.nic; }
       const points = pernic[__traffic.nic] || [];
-      __traffic.buffer = points.slice(-300); // last 5 minutes at 1Hz
+      // Backend now keeps 1 hour at ~2 Hz. We keep the whole hour (7200 points max)
+      __traffic.buffer = points.slice(-7200);
       __traffic.lastFetch = performance.now();
     }catch{}
   }
   function draw(){
-    const w = cvs.width = cvs.clientWidth; const h = cvs.height = 220;
-    ctx.clearRect(0,0,w,h);
-    const pts = __traffic.buffer;
-    if(pts.length<2){ requestAnimationFrame(draw); return; }
-    const now = performance.now();
-    const rx = pts.map(p=>p[1]); const tx = pts.map(p=>p[2]);
-    const max = Math.max(1, ...rx, ...tx);
-    const duration = Math.max(1, pts[pts.length-1][0]-pts[0][0]);
-    const xForTs = (ts)=>{
-      const t0 = pts[0][0]; const t1 = pts[pts.length-1][0];
-      return ((ts - t0) / (t1 - t0)) * w;
-    };
-    const yForVal = (v)=> h - (v/max)*(h-20) - 10;
-    // grid and axes
-    ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1; ctx.beginPath();
-    for(let i=0;i<5;i++){ const y = (h-20)*i/4 + 10; ctx.moveTo(0,y); ctx.lineTo(w,y); }
-    ctx.stroke();
-    // y-axis labels (KB/s)
-    ctx.fillStyle = '#7a8290'; ctx.font = '12px system-ui';
-    for(let i=0;i<=4;i++){ const val = (max*i/4)/1024; const y = (h-20)* (1 - i/4) + 10; ctx.fillText(val.toFixed(0)+' KB/s', 6, Math.max(12, Math.min(h-4, y-2))); }
-    // x-axis start/end times
-    const t0d = new Date(pts[0][0]*1000).toLocaleTimeString();
-    const t1d = new Date(pts[pts.length-1][0]*1000).toLocaleTimeString();
-    ctx.fillText(t0d, 6, h-4);
-    ctx.fillText(t1d, w-80, h-4);
-    // rx line
-    ctx.strokeStyle = '#5b9cff'; ctx.lineWidth = 2; ctx.beginPath();
-    pts.forEach((p,i)=>{ const x = xForTs(p[0]); const y = yForVal(p[1]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
-    ctx.stroke();
-    // tx line
-    ctx.strokeStyle = '#9cff9c'; ctx.lineWidth = 2; ctx.beginPath();
-    pts.forEach((p,i)=>{ const x = xForTs(p[0]); const y = yForVal(p[2]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
-    ctx.stroke();
+    if(isDual){
+      if(ctxWan){ scaleCanvas(cvsWan, ctxWan); drawOne(cvsWan, ctxWan, __traffic.buffer || []); }
+      if(ctxLan){ scaleCanvas(cvsLan, ctxLan); drawOne(cvsLan, ctxLan, __traffic.bufferLan || []); }
+      requestAnimationFrame(draw); return;
+    }
+    if(!ctxSingle || !single){ requestAnimationFrame(draw); return; }
+    scaleCanvas(single, ctxSingle);
+    drawOne(single, ctxSingle, __traffic.buffer || []);
     requestAnimationFrame(draw);
   }
   // fetch every 500ms for smoother updates (backend samples ~2 Hz)
   fetchData();
   setInterval(fetchData, 500);
   requestAnimationFrame(draw);
+}
+
+function drawOne(cvs, ctx, pts){
+  const w = cvs.width = cvs.clientWidth; const h = cvs.height = 220;
+  ctx.clearRect(0,0,w,h);
+  if(pts.length<2) return;
+  const windowSec = 60*60; const tEnd = pts[pts.length-1][0]; const tStart = tEnd - windowSec;
+  const xForTs = (ts)=> ((ts - tStart) / windowSec) * w;
+  const rx = pts.map(p=>p[1]); const tx = pts.map(p=>p[2]); const max = Math.max(1, ...rx, ...tx);
+  // paddings to ensure labels and legend are not obscured by the graph
+  const topPad = 28; const bottomPad = 44;
+  const chartHeight = h - topPad - bottomPad;
+  ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1; ctx.beginPath();
+  for(let i=0;i<5;i++){ const y = topPad + chartHeight * (i/4); ctx.moveTo(0,y); ctx.lineTo(w,y); } ctx.stroke();
+  ctx.fillStyle = '#7a8290'; ctx.font = '12px system-ui';
+  for(let i=0;i<=4;i++){ const val = (max*i/4)/1024; const y = topPad + chartHeight * (1 - i/4); ctx.fillText(val.toFixed(0)+' KB/s', 6, Math.max(12, Math.min(h-4, y-2))); }
+  // minute ticks: dense markers every 1 min, labels every 5 min; include "Now" label at right
+  const minute = 60; ctx.fillStyle = '#7a8290';
+  const tickY0 = h - bottomPad + 6; const tickY1 = tickY0 + 4; const labelY = h - 6;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+  for(let m=0; m<=60; m+=1){
+    const ts = tStart + m*minute; const x = xForTs(ts);
+    ctx.beginPath(); ctx.moveTo(x, tickY0); ctx.lineTo(x, tickY1); ctx.strokeStyle = '#2a2f3a'; ctx.stroke();
+    // Label only every 10 minutes to prevent clutter; skip the final label near "Now"
+    if(m%10===0){
+      if(x > w - 48) continue; // avoid collision with "Now"
+      const lab = new Date(ts*1000).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      ctx.fillText(lab, Math.max(20, Math.min(w-20, x)), labelY);
+    }
+  }
+  // "Now" label at right edge
+  ctx.textAlign = 'right'; ctx.fillText('Now', w-8, labelY);
+  ctx.strokeStyle = '#5b9cff'; ctx.lineWidth = 2; ctx.beginPath();
+  let started = false;
+  pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - (p[1]/max)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
+  ctx.strokeStyle = '#9cff9c'; ctx.lineWidth = 2; ctx.beginPath(); started=false;
+  pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - (p[2]/max)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
+  // Legend (top-right, above chart area)
+  const legendX = Math.max(8, w - 170); const legendY = 8;
+  ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+  ctx.fillStyle = '#5b9cff'; ctx.fillRect(legendX, legendY, 12, 4);
+  ctx.fillStyle = '#7a8290'; ctx.fillText('RX (download)', legendX+18, legendY+6);
+  ctx.fillStyle = '#9cff9c'; ctx.fillRect(legendX, legendY+14, 12, 4);
+  ctx.fillStyle = '#7a8290'; ctx.fillText('TX (upload)', legendX+18, legendY+20);
 }
 
 function setupTabs(){

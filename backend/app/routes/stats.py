@@ -9,6 +9,7 @@ import time
 import subprocess
 from typing import Dict, Any, List, Tuple
 from ..services.router_config_store import router_config_store
+from ..services.activity_monitor import activity_monitor
 
 
 router = APIRouter()
@@ -122,5 +123,13 @@ async def clients_usage() -> Dict[str, Any]:
         return {"active_connections_by_client": items}
     except Exception as exc:  # noqa: BLE001
         return {"error": str(exc)}
+
+
+@router.get("/activity", dependencies=[Depends(require_auth)])
+async def activity() -> Dict[str, Any]:
+    snap = await activity_monitor.get_snapshot()
+    # return as list for stable iteration in UI
+    items = sorted(snap.values(), key=lambda x: (0 if x.get("activity") == "streaming" else 1, -x.get("flows", 0)))
+    return {"items": items}
 
 
