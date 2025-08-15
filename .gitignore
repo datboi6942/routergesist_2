@@ -41,6 +41,8 @@ tmp/
 temp/
 **/.cache/
 **/run/
+# Explicit long-term stats file
+docker/data/run/longterm.json
 
 # Node/Web (if present)
 node_modules/

@@ -19,7 +19,7 @@ async function loadInterfaces(){
   el.innerHTML = '';
   const table = document.createElement('table');
   table.className = 'iface-table';
-  table.innerHTML = `<thead><tr><th>Name</th><th>Type</th><th>State</th><th>IPv4</th><th>Role</th><th style="width:1%"></th></tr></thead>`;
+  table.innerHTML = `<thead><tr><th>Name</th><th>Type</th><th>State</th><th>IPv4</th><th>Role</th><th class="th-actions"></th></tr></thead>`;
   const tbody = document.createElement('tbody');
   for(const i of data.interfaces){
     const tr = document.createElement('tr');
@@ -82,11 +82,15 @@ async function init(){
   await loadInterfaces();
   await loadThreats();
   await startTrafficChart();
+  if(typeof startLongTermCharts === 'function'){
+    await startLongTermCharts();
+  }
   await loadDomains();
   await loadTopDomains();
   await loadSummary();
   await loadConnections();
   await loadTopDomainsByClient();
+  await loadClientsByDomain();
   await loadNewDomains();
   await loadActivity();
   await refreshBlocklist();
@@ -98,8 +102,13 @@ async function init(){
   setInterval(()=>isTabActive('analytics')&&loadSummary(), 6000);
   setInterval(()=>isTabActive('analytics')&&loadConnections(), 12000);
   setInterval(()=>isTabActive('analytics')&&loadTopDomainsByClient(), 12000);
+  setInterval(()=>isTabActive('analytics')&&loadClientsByDomain(), 15000);
   setInterval(()=>isTabActive('analytics')&&loadNewDomains(), 30000);
   setInterval(()=>isTabActive('analytics')&&loadActivity(), 2000);
+  // Persist per-minute WAN averages for long-term charts (guarded)
+  if(typeof recordLongTermSample === 'function'){
+    setInterval(recordLongTermSample, 60000);
+  }
   setInterval(()=>isTabActive('security')&&refreshBlocklist(), 8000);
   setupTabs();
   // Bind buttons to avoid inline handlers (CSP safe)
@@ -202,6 +211,23 @@ async function loadTopDomainsByClient(){
   }catch{}
 }
 
+async function loadClientsByDomain(){
+  try{
+    const data = await api('/api/stats/clients-by-domain');
+    const el = document.getElementById('clientsByDomain'); if(!el) return;
+    el.innerHTML='';
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Domain</th><th>Clients</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    const by = data.by_domain || {};
+    Object.keys(by).forEach(domain=>{
+      const items = by[domain].map(([client,count])=>`${client} (${count})`).join(', ');
+      const tr = document.createElement('tr'); tr.innerHTML = `<td>${domain}</td><td>${items}</td>`; tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); el.appendChild(table);
+  }catch{}
+}
+
 async function loadNewDomains(){
   try{
     const data = await api('/api/stats/new-domains');
@@ -244,7 +270,9 @@ window.changePassword = changePassword;
 init();
 
 // Smooth animated traffic chart (no external deps)
-let __traffic = {buffer: [], nic: null, lastFetch: 0};
+let __traffic = {buffer: [], nic: null, lastFetch: 0, ltMaxBytes: 0, ltLastFetch: 0};
+// Expose selected NIC so long-term charts can use the same interface for consistent scales
+window.__traffic = __traffic;
 async function startTrafficChart(){
   const single = document.getElementById('trafficChart');
   const cvsWan = document.getElementById('trafficChartWan');
@@ -317,6 +345,16 @@ async function startTrafficChart(){
         if(lanNicName) lanNicName.textContent = lanPick;
         __traffic.lanNic = lanPick;
         __traffic.lastFetch = performance.now();
+        // Refresh long-term 1h max occasionally for consistent scale with bottom charts
+        if(!__traffic.ltLastFetch || (performance.now() - __traffic.ltLastFetch) > 30000){
+          try{
+            const lt1h = await api(`/api/stats/longterm?window_seconds=${3600}&nic=${encodeURIComponent(__traffic.nic)}`);
+            const arr = (lt1h.pernic && lt1h.pernic[__traffic.nic]) ? lt1h.pernic[__traffic.nic] : [];
+            let maxB = 0; arr.forEach(p=>{ if(p[1]>maxB) maxB=p[1]; if(p[2]>maxB) maxB=p[2]; });
+            __traffic.ltMaxBytes = maxB;
+            __traffic.ltLastFetch = performance.now();
+          }catch{}
+        }
         return;
       }
       // Single chart path: populate selector on first load
@@ -331,6 +369,15 @@ async function startTrafficChart(){
       // Backend now keeps 1 hour at ~2 Hz. We keep the whole hour (7200 points max)
       __traffic.buffer = points.slice(-7200);
       __traffic.lastFetch = performance.now();
+      if(!__traffic.ltLastFetch || (performance.now() - __traffic.ltLastFetch) > 30000){
+        try{
+          const lt1h = await api(`/api/stats/longterm?window_seconds=${3600}&nic=${encodeURIComponent(__traffic.nic)}`);
+          const arr = (lt1h.pernic && lt1h.pernic[__traffic.nic]) ? lt1h.pernic[__traffic.nic] : [];
+          let maxB = 0; arr.forEach(p=>{ if(p[1]>maxB) maxB=p[1]; if(p[2]>maxB) maxB=p[2]; });
+          __traffic.ltMaxBytes = maxB;
+          __traffic.ltLastFetch = performance.now();
+        }catch{}
+      }
     }catch{}
   }
   function draw(){
@@ -350,6 +397,34 @@ async function startTrafficChart(){
   requestAnimationFrame(draw);
 }
 
+// Compute dynamic Y-axis params with nice steps and adaptive units (bps/kbps/Mbps/Gbps)
+function computeYAxisParams(maxBytesPerSec){
+  const maxBps = Math.max(1, maxBytesPerSec * 8);
+  const niceStep = (raw)=>{
+    const pow10 = Math.pow(10, Math.floor(Math.log10(raw)));
+    const base = raw / pow10;
+    let factor = 1;
+    if(base <= 1) factor = 1; else if(base <= 2) factor = 2; else if(base <= 5) factor = 5; else factor = 10;
+    return factor * pow10;
+  };
+  let stepBps = niceStep(maxBps / 4);
+  let yMaxBps = stepBps * 4;
+  if(maxBps > yMaxBps * 0.98){ yMaxBps += stepBps; }
+  let unit = 'bps'; let unitDiv = 1;
+  if(yMaxBps >= 1_000_000_000){ unit='Gbps'; unitDiv=1_000_000_000; }
+  else if(yMaxBps >= 1_000_000){ unit='Mbps'; unitDiv=1_000_000; }
+  else if(yMaxBps >= 1_000){ unit='kbps'; unitDiv=1_000; }
+  const ticksBps = [];
+  for(let i=0;i<=4;i++){ ticksBps.push((yMaxBps * i) / 4); }
+  return { yMaxBps, unit, unitDiv, ticksBps };
+}
+
+function formatTick(bps, unit, unitDiv){
+  const val = bps / unitDiv;
+  const decimals = val < 10 ? 1 : 0;
+  return val.toFixed(decimals) + ' ' + unit;
+}
+
 function drawOne(cvs, ctx, pts){
   const w = cvs.width = cvs.clientWidth; const h = cvs.height = 220;
   ctx.clearRect(0,0,w,h);
@@ -362,8 +437,14 @@ function drawOne(cvs, ctx, pts){
   const chartHeight = h - topPad - bottomPad;
   ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1; ctx.beginPath();
   for(let i=0;i<5;i++){ const y = topPad + chartHeight * (i/4); ctx.moveTo(0,y); ctx.lineTo(w,y); } ctx.stroke();
+  // Dynamic Y-axis in bps with adaptive units; include 1h long-term peak for consistency
+  const maxForScale = Math.max(max, __traffic.ltMaxBytes || 0);
+  const yAxis = computeYAxisParams(maxForScale);
   ctx.fillStyle = '#7a8290'; ctx.font = '12px system-ui';
-  for(let i=0;i<=4;i++){ const val = (max*i/4)/1024; const y = topPad + chartHeight * (1 - i/4); ctx.fillText(val.toFixed(0)+' KB/s', 6, Math.max(12, Math.min(h-4, y-2))); }
+  for(let i=0;i<=4;i++){
+    const y = topPad + chartHeight * (1 - i/4);
+    ctx.fillText(formatTick(yAxis.ticksBps[i], yAxis.unit, yAxis.unitDiv), 6, Math.max(12, Math.min(h-4, y-2)));
+  }
   // minute ticks: dense markers every 1 min, labels every 5 min; include "Now" label at right
   const minute = 60; ctx.fillStyle = '#7a8290';
   const tickY0 = h - bottomPad + 6; const tickY1 = tickY0 + 4; const labelY = h - 6;
@@ -382,9 +463,9 @@ function drawOne(cvs, ctx, pts){
   ctx.textAlign = 'right'; ctx.fillText('Now', w-8, labelY);
   ctx.strokeStyle = '#5b9cff'; ctx.lineWidth = 2; ctx.beginPath();
   let started = false;
-  pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - (p[1]/max)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
+  pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - ((p[1]*8)/yAxis.yMaxBps)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
   ctx.strokeStyle = '#9cff9c'; ctx.lineWidth = 2; ctx.beginPath(); started=false;
-  pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - (p[2]/max)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
+  pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - ((p[2]*8)/yAxis.yMaxBps)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
   // Legend (top-right, above chart area)
   const legendX = Math.max(8, w - 170); const legendY = 8;
   ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
@@ -392,6 +473,178 @@ function drawOne(cvs, ctx, pts){
   ctx.fillStyle = '#7a8290'; ctx.fillText('RX (download)', legendX+18, legendY+6);
   ctx.fillStyle = '#9cff9c'; ctx.fillRect(legendX, legendY+14, 12, 4);
   ctx.fillStyle = '#7a8290'; ctx.fillText('TX (upload)', legendX+18, legendY+20);
+}
+
+// Long-term charts (24h and 7d)
+async function startLongTermCharts(){
+  const c24 = document.getElementById('lt24');
+  const c7 = document.getElementById('lt7d');
+  if(!c24 && !c7) return;
+  const ctx24 = c24 ? c24.getContext('2d') : null;
+  const ctx7 = c7 ? c7.getContext('2d') : null;
+
+  function scaleCanvasLT(cvs, ctx){
+    if(!cvs || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = cvs.clientWidth || 600;
+    const cssH = cvs.clientHeight || 220;
+    if(cvs.width !== Math.floor(cssW*dpr)){
+      cvs.width = Math.floor(cssW*dpr);
+      cvs.height = Math.floor(cssH*dpr);
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+    }
+  }
+
+  async function pickWanNic(){
+    // 0) Use the same NIC as the live WAN chart if available
+    try{
+      if(window.__traffic && window.__traffic.nic){ return window.__traffic.nic; }
+    }catch{}
+    // 1) Prefer configured WAN from router config
+    try{
+      const cfg = await api('/api/router/config');
+      const nic = cfg && cfg.wan && cfg.wan.interface;
+      if(nic) return nic;
+    }catch{}
+    // 2) Try summary roles
+    try{
+      const s = await api('/api/stats/summary');
+      const per = s.pernic || {};
+      let wan = Object.keys(per).find(n=> per[n] && per[n].role === 'WAN');
+      if(wan) return wan;
+      // fallback to NIC with highest rx
+      let best = null; let bestVal = -1;
+      Object.keys(per).forEach(n=>{ const v = per[n].rx_bps||0; if(v>bestVal){best=n; bestVal=v;} });
+      if(best) return best;
+    }catch{}
+    // 3) Fallback to long-term keys (most samples)
+    try{
+      const lt = await api(`/api/stats/longterm?window_seconds=${24*3600}`);
+      const pernic = lt.pernic || {};
+      let candidate = null; let maxLen = -1;
+      Object.keys(pernic).forEach(n=>{ const l = (pernic[n]||[]).length; if(l>maxLen){ maxLen=l; candidate=n; } });
+      return candidate;
+    }catch{ return null; }
+  }
+
+  function drawLongTerm(cvs, ctx, pts, windowSeconds){
+    if(!cvs || !ctx) return;
+    scaleCanvasLT(cvs, ctx);
+    const w = cvs.width; const h = cvs.height;
+    ctx.clearRect(0,0,w,h);
+    if(!pts || pts.length < 2){
+      // Show placeholder message so users know to wait for samples
+      ctx.fillStyle = '#7a8290';
+      ctx.font = '12px system-ui';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('Collecting data… (first point appears in ~1 min)', w/2, h/2);
+      return;
+    }
+    const tEnd = pts[pts.length-1][0];
+    const tStart = tEnd - windowSeconds;
+    const xForTs = (ts)=> ((ts - tStart) / windowSeconds) * w;
+    const rx = pts.map(p=>p[1]); const tx = pts.map(p=>p[2]);
+    const max = Math.max(1, ...rx, ...tx);
+    // Ensure long-term y-axis matches current live chart scale when available
+    let yAxis = computeYAxisParams(max);
+    try{
+      if(window.__traffic && Array.isArray(window.__traffic.buffer) && window.__traffic.buffer.length){
+        const liveRx = window.__traffic.buffer.map(p=>p[1]);
+        const liveTx = window.__traffic.buffer.map(p=>p[2]);
+        const liveMax = Math.max(1, ...liveRx, ...liveTx);
+        // Use the larger of the two to keep scales consistent
+        const targetMax = Math.max(max, liveMax);
+        yAxis = computeYAxisParams(targetMax);
+      }
+    }catch{}
+    const topPad = 28; const bottomPad = 44;
+    const chartHeight = h - topPad - bottomPad;
+    // grid
+    ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1; ctx.beginPath();
+    for(let i=0;i<5;i++){ const y = topPad + chartHeight * (i/4); ctx.moveTo(0,y); ctx.lineTo(w,y); } ctx.stroke();
+    // dynamic y-axis (reusing computed yAxis above)
+    ctx.fillStyle = '#7a8290'; ctx.font = '12px system-ui';
+    for(let i=0;i<=4;i++){
+      const y = topPad + chartHeight * (1 - i/4);
+      ctx.fillText(formatTick(yAxis.ticksBps[i], yAxis.unit, yAxis.unitDiv), 6, Math.max(12, Math.min(h-4, y-2)));
+    }
+    // x ticks: 1h ticks for 24h, 12h ticks for 7d; sparse labels to avoid overlap
+    const labelEvery = windowSeconds <= 24*3600 ? 4*3600 : 24*3600;
+    const tickEvery = windowSeconds <= 24*3600 ? 3600 : 12*3600;
+    const tickY0 = h - bottomPad + 6; const tickY1 = tickY0 + 4; const labelY = h - 6;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'alphabetic';
+    for(let ts = Math.ceil(tStart/tickEvery)*tickEvery; ts<=tEnd; ts+=tickEvery){
+      const x = xForTs(ts); ctx.beginPath(); ctx.moveTo(x, tickY0); ctx.lineTo(x, tickY1); ctx.strokeStyle = '#2a2f3a'; ctx.stroke();
+    }
+    const minSpacing = 64; let lastLabelX = -1e9;
+    for(let ts = Math.ceil(tStart/labelEvery)*labelEvery; ts<=tEnd; ts+=labelEvery){
+      const x = xForTs(ts);
+      if(x - lastLabelX < minSpacing) continue;
+      const opt = windowSeconds <= 24*3600 ? {hour:'2-digit'} : {month:'2-digit', day:'2-digit'};
+      const lab = new Date(ts*1000).toLocaleString([], opt);
+      ctx.fillStyle = '#7a8290'; ctx.fillText(lab, Math.max(20, Math.min(w-28, x)), labelY);
+      lastLabelX = x;
+    }
+    // Right-edge "Now" label
+    ctx.textAlign = 'right'; ctx.fillText('Now', w-8, labelY);
+    // lines
+    ctx.strokeStyle = '#5b9cff'; ctx.lineWidth = 2; ctx.beginPath(); let started=false;
+    pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - ((p[1]*8)/yAxis.yMaxBps)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
+    ctx.strokeStyle = '#9cff9c'; ctx.lineWidth = 2; ctx.beginPath(); started=false;
+    pts.forEach((p)=>{ if(p[0] < tStart) return; const x=xForTs(p[0]); const y= topPad + chartHeight - ((p[2]*8)/yAxis.yMaxBps)*chartHeight; if(x<=0||x>=w) return; if(!started){ ctx.moveTo(x,y); started=true; } else { ctx.lineTo(x,y); } }); if(started) ctx.stroke();
+    // legend
+    const legendX = Math.max(8, w - 170); const legendY = 8;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = '#5b9cff'; ctx.fillRect(legendX, legendY, 12, 4);
+    ctx.fillStyle = '#7a8290'; ctx.fillText('RX (download)', legendX+18, legendY+6);
+    ctx.fillStyle = '#9cff9c'; ctx.fillRect(legendX, legendY+14, 12, 4);
+    ctx.fillStyle = '#7a8290'; ctx.fillText('TX (upload)', legendX+18, legendY+20);
+  }
+
+  async function refresh(){
+    const wan = await pickWanNic();
+    if(!wan) return;
+    try{
+      if(ctx24){
+        const d24 = await api(`/api/stats/longterm?window_seconds=${24*3600}&nic=${encodeURIComponent(wan)}`);
+        let pts24 = (d24.pernic && d24.pernic[wan]) ? d24.pernic[wan] : [];
+        if((!pts24 || pts24.length < 2)){
+          // Fallback: aggregate all NICs so user still sees activity
+          const all24 = await api(`/api/stats/longterm?window_seconds=${24*3600}`);
+          const per = all24.pernic || {};
+          pts24 = mergeAllNics(per);
+        }
+        drawLongTerm(c24, ctx24, pts24, 24*3600);
+      }
+      if(ctx7){
+        const d7 = await api(`/api/stats/longterm?window_seconds=${7*24*3600}&nic=${encodeURIComponent(wan)}`);
+        let pts7 = (d7.pernic && d7.pernic[wan]) ? d7.pernic[wan] : [];
+        if((!pts7 || pts7.length < 2)){
+          const all7 = await api(`/api/stats/longterm?window_seconds=${7*24*3600}`);
+          const per7 = all7.pernic || {};
+          pts7 = mergeAllNics(per7);
+        }
+        drawLongTerm(c7, ctx7, pts7, 7*24*3600);
+      }
+    }catch{}
+  }
+
+  function mergeAllNics(pernic){
+    // Merge by minute bucket to handle slightly different sample times
+    const bucket = new Map();
+    Object.values(pernic).forEach(arr=>{
+      (arr||[]).forEach(([ts,rx,tx])=>{
+        const key = Math.round(ts/60)*60;
+        const prev = bucket.get(key) || [key,0,0];
+        prev[1]+=rx; prev[2]+=tx; bucket.set(key, prev);
+      });
+    });
+    return Array.from(bucket.values()).sort((a,b)=>a[0]-b[0]);
+  }
+
+  await refresh();
+  setInterval(refresh, 30000);
 }
 
 function setupTabs(){

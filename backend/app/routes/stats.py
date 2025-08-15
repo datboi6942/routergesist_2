@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 
 from ..security.auth import require_auth
 from ..services.stats_service import stats_service
 from ..services.dns_monitor import dns_monitor
 import time
 import subprocess
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List, Tuple, Optional
 from ..services.router_config_store import router_config_store
+from ..services.interface_manager import interface_manager
 from ..services.activity_monitor import activity_monitor
+from ..services.longterm_service import longterm_service
 
 
 router = APIRouter()
@@ -39,11 +41,28 @@ async def top_domains(limit: int = 10, window_seconds: int = 600) -> Dict[str, A
 
 @router.get("/summary", dependencies=[Depends(require_auth)])
 async def summary(window_seconds: int = 120) -> Dict[str, Any]:
-    # Compute average rx/tx over window for each NIC; also mark LAN/WAN from config
+    """Return short-window averages and dynamic roles per NIC.
+
+    Role selection precedence:
+    1) Real-time roles from interface_manager ("WAN" or "AP" → label "LAN").
+    2) Configured interfaces from router_config_store (LAN/WAN).
+    3) Fallback to "other".
+    """
     hist = await stats_service.get_history()
+    # Gather runtime roles from interface_manager
+    roles_map: Dict[str, str] = {}
+    try:
+        for info in await interface_manager.get_status():
+            if info.role:
+                roles_map[info.name] = "LAN" if info.role == "AP" else info.role
+    except Exception:
+        roles_map = {}
+
+    # Config fallback
     cfg = router_config_store.load()
     lan_if = cfg.get("lan", {}).get("interface")
     wan_if = cfg.get("wan", {}).get("interface")
+
     now = time.time()
     pernic: Dict[str, Dict[str, float]] = {}
     for nic, points in hist.items():
@@ -54,10 +73,13 @@ async def summary(window_seconds: int = 120) -> Dict[str, Any]:
                 rx_vals.append(rx)
                 tx_vals.append(tx)
         if rx_vals or tx_vals:
+            role = roles_map.get(nic)
+            if not role:
+                role = "LAN" if nic == lan_if else ("WAN" if nic == wan_if else "other")
             pernic[nic] = {
                 "rx_bps": sum(rx_vals) / max(1, len(rx_vals)),
                 "tx_bps": sum(tx_vals) / max(1, len(tx_vals)),
-                "role": "LAN" if nic == lan_if else ("WAN" if nic == wan_if else "other"),
+                "role": role,
             }
     return {"pernic": pernic}
 
@@ -104,6 +126,29 @@ async def new_domains(window_seconds: int = 3600) -> Dict[str, Any]:
     return {"items": items}
 
 
+@router.get("/clients-by-domain", dependencies=[Depends(require_auth)])
+async def clients_by_domain(limit: int = 10, window_seconds: int = 600) -> Dict[str, Any]:
+    """Return top domains with counts of unique client queries within window.
+
+    Response: { by_domain: { domain: [[client, count], ...], ... } }
+    """
+    by_client = await dns_monitor.get_recent_by_client(window_seconds=window_seconds)
+    # invert to domain -> client -> count
+    per_domain: Dict[str, Dict[str, int]] = {}
+    for client, items in by_client.items():
+        for domain, _ts in items:
+            bucket = per_domain.setdefault(domain, {})
+            bucket[client] = bucket.get(client, 0) + 1
+    # pick top domains by total query count
+    domain_totals: List[Tuple[str, int]] = [(dom, sum(m.values())) for dom, m in per_domain.items()]
+    top = sorted(domain_totals, key=lambda kv: kv[1], reverse=True)[:limit]
+    out: Dict[str, List[Tuple[str, int]]] = {}
+    for dom, _tot in top:
+        clients = per_domain.get(dom, {})
+        out[dom] = sorted(clients.items(), key=lambda kv: kv[1], reverse=True)
+    return {"by_domain": out}
+
+
 @router.get("/clients-usage", dependencies=[Depends(require_auth)])
 async def clients_usage() -> Dict[str, Any]:
     try:
@@ -132,4 +177,13 @@ async def activity() -> Dict[str, Any]:
     items = sorted(snap.values(), key=lambda x: (0 if x.get("activity") == "streaming" else 1, -x.get("flows", 0)))
     return {"items": items}
 
+
+@router.get("/longterm", dependencies=[Depends(require_auth)])
+async def longterm(window_seconds: int = Query(24 * 3600, ge=60), nic: Optional[str] = None) -> Dict[str, Any]:
+    """Return per-minute averages per NIC within the requested window.
+
+    Response: { pernic: { nic: [[ts, rx_bps, tx_bps], ...], ... } }
+    """
+    data = await longterm_service.get_window(window_seconds=window_seconds, nic=nic)
+    return {"pernic": data}
 

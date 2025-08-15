@@ -61,6 +61,19 @@
           </div>
         </div>
       </section>
+      <section class="card card-traffic">
+        <h2 class="m-0">Long‑term Activity</h2>
+        <div class="row wrap gap-16">
+          <div class="flex-1">
+            <h3 class="m-0">Last 24 hours (WAN)</h3>
+            <canvas id="lt24" class="traffic" height="220"></canvas>
+          </div>
+          <div class="flex-1">
+            <h3 class="m-0">Last 7 days (WAN)</h3>
+            <canvas id="lt7d" class="traffic" height="220"></canvas>
+          </div>
+        </div>
+      </section>
       <section class="card">
         <h2>Visited Domains</h2>
         <div id="domains"></div>
@@ -74,6 +87,10 @@
         <div id="topDomainsByClient"></div>
       </section>
       <section class="card">
+        <h2>Clients per Domain (10 min)</h2>
+        <div id="clientsByDomain"></div>
+      </section>
+      <section class="card">
         <h2>New Domains (last hour)</h2>
         <div id="newDomains"></div>
       </section>
@@ -85,7 +102,7 @@
         <h2>Connections</h2>
         <div id="connections"></div>
       </section>
-      <section class="card">
+      <section class="card card-activity">
         <h2>Activity by Device</h2>
         <div id="activity"></div>
       </section>

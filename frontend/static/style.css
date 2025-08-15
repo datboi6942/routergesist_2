@@ -64,6 +64,7 @@ input{background:#0e131b; color:var(--fg); border:1px solid var(--border); paddi
 /* Interface table layout fixes */
 .iface-table{ table-layout:fixed }
 .iface-table th, .iface-table td{ vertical-align:middle }
+.iface-table th.th-actions{ width:1% }
 .iface-table th:nth-child(1), .iface-table td:nth-child(1){ width: 22%; overflow:hidden; text-overflow:ellipsis; white-space:nowrap }
 .iface-table th:nth-child(2), .iface-table td:nth-child(2){ width: 10% }
 .iface-table th:nth-child(3), .iface-table td:nth-child(3){ width: 10% }
@@ -88,4 +89,104 @@ button.tiny{ padding:4px 8px; font-size:12px }
 }
 
 
+
+/* =============================
+   2030 UI Visual Overhaul (Frontend-only)
+   ============================= */
+
+/* Palette, surfaces, motion overrides */
+:root{
+  --bg:#0b0e14; --fg:#e9eef5; --muted:#a1a9b2; --card:#111522; --border:#243044; --accent:#78a6ff; --danger:#ff4d4d;
+  --accent-1:#78a6ff; --accent-2:#6ae3ff; --accent-3:#9cffd0;
+  --surface-1:rgba(17,21,34,0.92); --surface-2:rgba(20,26,42,0.7);
+  --radius-1:14px; --radius-2:10px;
+  --shadow-1:0 10px 30px rgba(0,0,0,.35); --shadow-2:0 4px 18px rgba(0,0,0,.35);
+  --t-fast:120ms; --t-mid:220ms; --t-slow:420ms;
+}
+
+body{
+  font:16px/1.55 system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, "Helvetica Neue", Arial;
+  background-image:
+    radial-gradient(60rem 60rem at 20% -10%, rgba(120,166,255,.25), transparent 60%),
+    radial-gradient(50rem 50rem at 110% 20%, rgba(106,227,255,.18), transparent 55%),
+    radial-gradient(30rem 30rem at -10% 90%, rgba(156,255,208,.12), transparent 50%);
+}
+/* Futuristic grid overlay */
+/* Disable grid overlay if it interferes with input; uncomment to re-enable */
+body::before{ display:none }
+
+header{position:sticky; top:0; z-index:5; backdrop-filter:saturate(120%) blur(10px); background:linear-gradient(180deg, rgba(17,21,34,.9), rgba(17,21,34,.6)); border-bottom:1px solid rgba(68,102,153,.35)}
+footer{backdrop-filter:saturate(120%) blur(6px); background:linear-gradient(0deg, rgba(17,21,34,.7), rgba(17,21,34,.3))}
+
+.tabs, main, .tab-pane, .card{ position: relative }
+.tabs{position:sticky; top:56px; z-index:4; background:linear-gradient(180deg, rgba(17,21,34,.85), rgba(17,21,34,.6))}
+.tab-pane{ z-index: 1 }
+.card{ z-index: 1 }
+.tab{position:relative; z-index:2; padding:12px 16px; background:rgba(32,36,56,.55); border:1px solid rgba(65,82,120,.4); border-bottom:none; border-top-left-radius:12px; border-top-right-radius:12px; transition:transform var(--t-fast) ease, background var(--t-mid) ease, color var(--t-mid) ease, box-shadow var(--t-mid) ease}
+.tab:hover{transform:translateY(-1px); background:rgba(40,46,72,.7); box-shadow:0 6px 18px rgba(0,0,0,.25) inset}
+.tab.active{background:#232a44; color:#fff; box-shadow:inset 0 -2px 0 rgba(120,166,255,.7)}
+.tab.active::after{content:""; display:block; height:2px; background:linear-gradient(90deg, var(--accent-1), var(--accent-2)); margin-top:8px; border-radius:2px}
+
+.card{background:var(--surface-1); border:1px solid rgba(90,116,164,.25); border-radius:var(--radius-1); box-shadow:var(--shadow-2); position:relative; overflow:visible; transition:transform var(--t-mid) ease, box-shadow var(--t-mid) ease, border-color var(--t-mid) ease}
+.card::before{content:""; position:absolute; inset:0; pointer-events:none; z-index:0; background:radial-gradient(1200px 200px at -10% -20%, rgba(120,166,255,.12), transparent 35%), radial-gradient(900px 160px at 110% -10%, rgba(106,227,255,.08), transparent 40%)}
+
+/* Ensure form controls are interactive regardless of overlay stacks */
+button, input, select, textarea, label, a{ position: relative; z-index: 2; pointer-events: auto }
+.card:hover{transform:translateY(-2px); box-shadow:0 12px 28px rgba(0,0,0,.35); border-color:rgba(120,166,255,.35)}
+
+table{border-collapse:separate; border-spacing:0}
+th,td{padding:10px; border-bottom:1px solid rgba(50,70,104,.6)}
+tbody tr{transition:background var(--t-fast) ease}
+tbody tr:hover{background:rgba(120,166,255,.06)}
+
+canvas.traffic{border-radius:12px; background:linear-gradient(180deg, rgba(23,27,43,.7), rgba(18,22,36,.6)); border:1px solid rgba(72,96,138,.35); box-shadow:inset 0 0 0 1px rgba(255,255,255,.02), 0 8px 18px rgba(0,0,0,.35)}
+
+button{border:1px solid rgba(72,96,138,.45); background:linear-gradient(180deg, rgba(40,46,72,.9), rgba(30,36,62,.9)); border-radius:10px; transition:transform var(--t-fast) ease, box-shadow var(--t-fast) ease, border-color var(--t-fast) ease, background var(--t-fast) ease}
+button:hover{transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.35); border-color:rgba(120,166,255,.5); background:linear-gradient(180deg, rgba(46,54,86,.95), rgba(34,40,70,.95))}
+button:active{transform:translateY(0)}
+button.nuke{border-color:rgba(255,77,77,.65); color:#fff; background:linear-gradient(180deg, #3a1515, #2b1515)}
+button.nuke:hover{background:linear-gradient(180deg, #4a1818, #331616)}
+
+input{background:rgba(10,14,24,.75); border:1px solid rgba(72,96,138,.45); padding:10px 12px; border-radius:10px; transition:border-color var(--t-fast) ease, box-shadow var(--t-fast) ease, background var(--t-fast) ease}
+input:focus{outline:none; border-color:rgba(120,166,255,.6); box-shadow:0 0 0 3px rgba(120,166,255,.18)}
+
+#modal .modal-card{background:var(--surface-1); border:1px solid rgba(90,116,164,.35); border-radius:16px; max-width:780px; width:92%; padding:18px; box-shadow:var(--shadow-1)}
+#modal pre{background:rgba(10,14,24,.8); border:1px solid rgba(72,96,138,.4); padding:14px; border-radius:12px}
+
+.login-container{max-width:460px}
+.login-container .card{overflow:visible}
+.login-container .card::after{content:""; position:absolute; inset:-1px; border-radius:inherit; pointer-events:none; background:
+  conic-gradient(from 180deg at 60% -20%, rgba(120,166,255,.22), transparent 20%),
+  conic-gradient(from 180deg at -10% 60%, rgba(106,227,255,.16), transparent 26%);
+  mask:linear-gradient(#000,#000) content-box, linear-gradient(#000,#000);
+  padding:1px; -webkit-mask-composite: xor; mask-composite: exclude; opacity:.9}
+
+/* Motion utilities */
+@keyframes fadeInUp{from{opacity:0; transform:translate3d(0,8px,0)} to{opacity:1; transform:translate3d(0,0,0)}}
+.tab-pane.active .card{animation:fadeInUp var(--t-slow) cubic-bezier(.2,.65,.15,1) both}
+@media (prefers-reduced-motion: reduce){
+  .tab-pane.active .card{animation:none}
+  *{transition:none!important}
+}
+
+/* Scrollbar aesthetics */
+*::-webkit-scrollbar{height:10px;width:10px}
+*::-webkit-scrollbar-thumb{background:linear-gradient(180deg, rgba(120,166,255,.5), rgba(106,227,255,.45)); border-radius:10px; border:2px solid rgba(17,21,34,.6)}
+*::-webkit-scrollbar-track{background:rgba(20,26,42,.3); border-radius:10px}
+
+/* Layout helpers */
+.card-activity{ grid-column: 1 / -1 }
+
+/* Keep only data-heavy panels scrollable */
+#tab-analytics #activity,
+#tab-analytics #clientsByDomain{
+  max-height: 380px;
+  overflow: auto;
+}
+
+/* Clients per Domain: allow horizontal scroll and full domain visibility */
+#tab-analytics #clientsByDomain{ overflow-x:auto }
+#clientsByDomain table{ table-layout:auto; min-width:900px }
+#clientsByDomain th:nth-child(1), #clientsByDomain td:nth-child(1){ width:auto; white-space:nowrap; overflow:visible; text-overflow:initial }
+#clientsByDomain th:nth-child(2), #clientsByDomain td:nth-child(2){ white-space:normal; word-break:break-word }
 
