@@ -30,52 +30,51 @@ rfkill unblock all || true
 nmcli dev disconnect "$WIFI_IF" >/dev/null 2>&1 || true
 nmcli dev set "$WIFI_IF" managed no >/dev/null 2>&1 || true
 pkill -f "wpa_supplicant.*$WIFI_IF" >/dev/null 2>&1 || true
-# Force AP mode on the Wi‑Fi interface to avoid nl80211 beacon failures
+# Prepare Wi‑Fi interface; let hostapd take it to AP mode itself
 ip link set "$WIFI_IF" down || true
-iw dev "$WIFI_IF" set type __ap || true
+iw dev "$WIFI_IF" set type managed >/dev/null 2>&1 || true
 ip link set "$WIFI_IF" up || true
+# Use base interface for AP; do not create virtual AP
+AP_IF="$WIFI_IF"
 
-# 1) IP address on LAN side (serve clients over Wi‑Fi AP). We use WIFI_IF as LAN edge.
-LAN_EDGE_IF="$WIFI_IF"
+# 1) IP address on LAN side (serve clients over Wi‑Fi AP). Prefer AP_IF if present.
+LAN_EDGE_IF="$AP_IF"
+ip addr flush dev "$WIFI_IF" || true
 ip addr flush dev "$LAN_EDGE_IF" || true
 ip addr add "$LAN_CIDR" dev "$LAN_EDGE_IF" || true
 ip link set "$LAN_EDGE_IF" up || true
 
-# 2) Enable IPv4 forwarding
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
+# 2) Enable IPv4 forwarding (skip if not permitted, e.g., rootless container)
+if [ -w /proc/sys/net/ipv4/ip_forward ]; then
+  sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+fi
 
-# 3) nftables NAT/forward baseline
-cat >/tmp/routergeist.nft <<'NFT'
-flush ruleset
-table inet filter {
-  chain input { type filter hook input priority 0; policy accept; }
-  chain forward { type filter hook forward priority 0; policy accept; }
-  chain output { type filter hook output priority 0; policy accept; }
-}
-table ip nat {
-  chain prerouting { type nat hook prerouting priority -100; }
-  chain postrouting { type nat hook postrouting priority 100; }
-}
-NFT
-nft -f /tmp/routergeist.nft || true
+# 3) nftables NAT/forward baseline (scoped tables; no global flush)
+nft add table inet routergeist_filter 2>/dev/null || true
+nft add chain inet routergeist_filter input '{ type filter hook input priority 0; policy accept; }' 2>/dev/null || true
+nft add chain inet routergeist_filter forward '{ type filter hook forward priority 0; policy accept; }' 2>/dev/null || true
+nft add chain inet routergeist_filter output '{ type filter hook output priority 0; policy accept; }' 2>/dev/null || true
+nft add table ip routergeist_nat 2>/dev/null || true
+nft add chain ip routergeist_nat prerouting '{ type nat hook prerouting priority -100; }' 2>/dev/null || true
+nft add chain ip routergeist_nat postrouting '{ type nat hook postrouting priority 100; }' 2>/dev/null || true
 
 # 3b) Lock down admin panel to AP network only
 # Determine admin port (default 8080)
 ADMIN_PORT=$(jq -r '.admin.port' "$CFG_JSON" 2>/dev/null || echo "")
 if [[ -z "$ADMIN_PORT" || "$ADMIN_PORT" == "null" ]]; then ADMIN_PORT=8080; fi
 # Always allow loopback traffic
-nft add rule inet filter input iif lo accept || true
+nft add rule inet routergeist_filter input iif lo accept || true
 # Allow admin access only from the AP/LAN interface
-nft add rule inet filter input iif "$LAN_EDGE_IF" tcp dport $ADMIN_PORT accept || true
+nft add rule inet routergeist_filter input iif "$LAN_EDGE_IF" tcp dport $ADMIN_PORT accept || true
 # Drop admin access from any other interface (e.g., WAN)
-nft add rule inet filter input tcp dport $ADMIN_PORT drop || true
+nft add rule inet routergeist_filter input tcp dport $ADMIN_PORT drop || true
 
 # 4) Masquerade from LAN to WAN
-nft add rule ip nat postrouting oif "$WAN_IF" masquerade || true
+nft add rule ip routergeist_nat postrouting oif "$WAN_IF" masquerade || true
 
 # Allow forwarding from LAN edge to WAN and established traffic
-nft add rule inet filter forward ct state established,related accept || true
-nft add rule inet filter forward iif "$LAN_EDGE_IF" oif "$WAN_IF" accept || true
+nft add rule inet routergeist_filter forward ct state established,related accept || true
+nft add rule inet routergeist_filter forward iif "$LAN_EDGE_IF" oif "$WAN_IF" accept || true
 
 # 5) dnsmasq minimal config for DHCP on LAN
 mkdir -p /etc/routergeist
@@ -115,9 +114,11 @@ if jq -e '.dns_overrides | length > 0' "$CFG_JSON" >/dev/null 2>&1; then
     echo "address=/$H/$IP" >> /etc/routergeist/dnsmasq.conf
   done < <(jq -c '.dns_overrides[]' "$CFG_JSON")
 fi
-systemctl stop dnsmasq.service || true
-mkdir -p /etc/systemd/system
-cat >/etc/systemd/system/routergeist-dnsmasq.service <<'UNIT'
+# Start dnsmasq (systemd if present; otherwise directly)
+if [ -d /run/systemd/system ]; then
+  systemctl stop dnsmasq.service || true
+  mkdir -p /etc/systemd/system
+  cat >/etc/systemd/system/routergeist-dnsmasq.service <<'UNIT'
 [Unit]
 Description=RouterGeist dnsmasq
 After=network-online.target
@@ -131,15 +132,29 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload
-systemctl enable --now routergeist-dnsmasq.service || true
+  systemctl daemon-reload
+  systemctl enable --now routergeist-dnsmasq.service || true
+else
+  pkill -x dnsmasq >/dev/null 2>&1 || true
+  sleep 0.5
+  dnsmasq --conf-file=/etc/routergeist/dnsmasq.conf --user=nobody --group=nogroup --keep-in-foreground &
+  echo "dnsmasq started (container mode)"
+fi
 
 # 6) hostapd config for AP (on Wi‑Fi interface)
 mkdir -p /etc/routergeist
 mkdir -p /var/run/hostapd || true
+# Sanitize PSK and select correct hostapd key directive
+PSK_CLEAN=$(printf '%s' "$PSK" | tr -d '\r' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+if echo "$PSK_CLEAN" | grep -Eq '^[0-9A-Fa-f]{64}$'; then
+  WPA_LINE="wpa_psk=$PSK_CLEAN"
+else
+  # hostapd passphrase must be 8..63 ASCII
+  WPA_LINE="wpa_passphrase=$PSK_CLEAN"
+fi
 cat >/etc/routergeist/hostapd.conf <<EOF
 country_code=$COUNTRY
-interface=$WIFI_IF
+interface=$AP_IF
 driver=nl80211
 ssid=$SSID
 hw_mode=g
@@ -155,7 +170,7 @@ wmm_ac_be_aifs=3
 wmm_ac_vi_aifs=2
 wmm_ac_vo_aifs=2
 wpa=2
-wpa_passphrase=$PSK
+$WPA_LINE
 # WPA2-PSK (RSN) with AES/CCMP only for modern client compatibility (iOS/Android)
 wpa_key_mgmt=WPA-PSK
 rsn_pairwise=CCMP
@@ -164,8 +179,15 @@ ieee80211w=0
 macaddr_acl=0
 ignore_broadcast_ssid=0
 ctrl_interface=/var/run/hostapd
+ap_isolate=0
+disassoc_low_ack=1
+beacon_int=100
+dtim_period=2
+max_num_sta=64
 EOF
-cat >/etc/systemd/system/routergeist-hostapd.service <<'UNIT'
+# Start hostapd (prefer systemd when PID 1 is systemd or container runs with systemd)
+if [ -d /run/systemd/system ] && pidof systemd >/dev/null 2>&1; then
+  cat >/etc/systemd/system/routergeist-hostapd.service <<'UNIT'
 [Unit]
 Description=RouterGeist hostapd
 After=network-online.target
@@ -179,8 +201,14 @@ Restart=always
 [Install]
 WantedBy=multi-user.target
 UNIT
-systemctl daemon-reload
-systemctl enable --now routergeist-hostapd.service || true
+  systemctl daemon-reload
+  systemctl enable --now routergeist-hostapd.service || true
+else
+  pkill -x hostapd >/dev/null 2>&1 || true
+  # Let hostapd perform the interface type switch to AP
+  hostapd -B /etc/routergeist/hostapd.conf
+  echo "hostapd started (container mode)"
+fi
 
 # 7) WAN
 # Do not disrupt an already-connected WAN (e.g., managed by NetworkManager).

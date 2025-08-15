@@ -15,13 +15,17 @@ services:
       - LOG_LEVEL=INFO
       # Set OPENAI_API_KEY here for dev if desired
     volumes:
-      - ../backend:/app/backend:ro
-      - ../frontend:/app/frontend:ro
+      - ../backend:/app/backend
+      - ../frontend:/app/frontend
+      - ../scripts:/app/scripts
       - ./data:/data
     network_mode: host
     # For interface scan tools inside container
     cap_add:
       - NET_ADMIN
       - NET_RAW
+      - SYS_MODULE
     restart: unless-stopped
+    privileged: true
+    # Use image default CMD (/app/entrypoint.sh) so AP is applied before backend starts
 

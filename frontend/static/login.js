@@ -28,9 +28,13 @@ async function initBootstrap(){
       const p = document.getElementById('bpass').value;
       const el = document.getElementById('bmsg');
       try{
+        if(p.length < 10){ el.textContent = 'Password must be at least 10 characters.'; return; }
         await api('/api/auth/bootstrap', { method:'POST', body: JSON.stringify({ username: u, password: p }) });
         el.textContent = 'Admin created. You can now log in.';
-      }catch(e){ el.textContent = 'Bootstrap failed'; }
+      }catch(e){
+        try{ const j = JSON.parse(e.message); el.textContent = j.detail || 'Bootstrap failed'; }
+        catch{ el.textContent = 'Bootstrap failed'; }
+      }
     });
   }
 }

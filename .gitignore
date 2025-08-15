@@ -66,6 +66,7 @@ secrets.*
 *.crt
 *.p12
 *.der
+backend/.venv/
 
 # Local data files (generated outside repo but ignored if present)
 *.sqlite

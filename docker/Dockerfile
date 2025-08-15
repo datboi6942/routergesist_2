@@ -7,10 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1
 
-# Minimal OS deps; add tools we use for interface scans and logs
+# Minimal OS deps; add tools we use for interface scans and AP services
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
        iproute2 iputils-ping iw jq curl tini \
+       hostapd dnsmasq nftables isc-dhcp-client rfkill procps wireless-regdb \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -22,20 +23,21 @@ RUN pip install -r backend/requirements.txt
 # Copy app
 COPY backend /app/backend
 COPY frontend /app/frontend
+COPY scripts /app/scripts
+COPY docker/entrypoint.sh /app/entrypoint.sh
 
 # Healthcheck endpoint uses FastAPI root redirect -> /static/index.html
 ENV HOST=0.0.0.0 \
     PORT=8080 \
     APP_DATA_DIR=/data
 
-# Create data dir
-RUN mkdir -p /data && adduser --disabled-login --gecos '' routergeist \
-    && chown -R routergeist:routergeist /data /app
-USER routergeist
+# Create data dir (run as root in container to allow privileged ops)
+RUN mkdir -p /data /data/run && chmod +x /app/entrypoint.sh
 
 EXPOSE 8080
 
+# Entrypoint runs AP apply then starts backend (no systemd)
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "backend.app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+CMD ["/app/entrypoint.sh"]
 
 

@@ -13,9 +13,9 @@ DEFAULT_CONFIG: Dict[str, Any] = {
     },
     "lan": {
         "interface": "eth0",
-        "cidr": "192.168.5.1/24",
-        "dhcp_start": "192.168.5.50",
-        "dhcp_end": "192.168.5.200",
+        "cidr": "192.168.50.1/24",
+        "dhcp_start": "192.168.50.50",
+        "dhcp_end": "192.168.50.200",
         "dns": ["1.1.1.1", "9.9.9.9"],
     },
     "wan": {
@@ -25,11 +25,12 @@ DEFAULT_CONFIG: Dict[str, Any] = {
         "pppoe": {"username": "", "password": ""},
     },
     "wifi": {
-        "interface": "wlan0",
+        # interface is auto-selected on first apply if unset or conflicts with WAN
+        "interface": "",
         "ssid": "RouterGeist",
         "psk": "ChangeMe1234",
         "country": "US",
-        "channel": 6,
+        "channel": 1,
         "guest_enabled": False,
         "guest_ssid": "RouterGeist-Guest",
         "guest_psk": "ChangeMe1234",

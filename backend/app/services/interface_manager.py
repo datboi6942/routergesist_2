@@ -85,8 +85,16 @@ class InterfaceManager:
         if not wifi_ifaces:
             return
 
+        default_iface = self._get_default_route_iface()
+
         if len(wifi_ifaces) == 1:
             iface = wifi_ifaces[0]
+            # If default route is on a different (non-wifi) iface, use wifi for AP
+            if default_iface and default_iface != iface.name:
+                if self._roles.get(iface.name) != "AP":
+                    await self.assign_role(iface.name, "AP")
+                return
+            # Otherwise pick based on WAN credentials
             if iface.role is None:
                 if self._wan_candidates_available():
                     await self.assign_role(iface.name, "WAN")
@@ -95,14 +103,16 @@ class InterfaceManager:
             return
 
         # Two or more wireless NICs
-        # Prefer one WAN and one AP
+        # Prefer default-route iface for WAN if it is wireless; otherwise first wifi for WAN and the other for AP
         roles = {i.name: i.role for i in wifi_ifaces}
         names = [i.name for i in wifi_ifaces]
 
+        chosen_wan = default_iface if default_iface in names else names[0]
+        ap_candidates = [n for n in names if n != chosen_wan]
         if "WAN" not in roles.values():
-            await self.assign_role(names[0], "WAN")
-        if "AP" not in roles.values() and len(names) > 1:
-            await self.assign_role(names[1], "AP")
+            await self.assign_role(chosen_wan, "WAN")
+        if "AP" not in roles.values() and ap_candidates:
+            await self.assign_role(ap_candidates[0], "AP")
 
     def _scan_interfaces(self) -> List[InterfaceInfo]:
         result: List[InterfaceInfo] = []
@@ -174,6 +184,19 @@ class InterfaceManager:
             print(f"[interface_manager] ensured AP via apply_router_config on {iface}")
         except Exception as exc:  # noqa: BLE001
             print(f"[interface_manager] AP ensure error: {exc}")
+
+    def _get_default_route_iface(self) -> Optional[str]:
+        try:
+            out = subprocess.check_output(["ip", "route", "show", "default"], text=True)
+            for line in out.splitlines():
+                parts = line.split()
+                if "dev" in parts:
+                    idx = parts.index("dev")
+                    if idx + 1 < len(parts):
+                        return parts[idx + 1]
+        except Exception:
+            pass
+        return None
 
 
 interface_manager = InterfaceManager()

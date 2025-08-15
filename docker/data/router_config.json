@@ -1,0 +1,41 @@
+{
+  "admin": {
+    "port": 8080
+  },
+  "lan": {
+    "interface": "eth0",
+    "cidr": "192.168.50.1/24",
+    "dhcp_start": "192.168.50.50",
+    "dhcp_end": "192.168.50.200",
+    "dns": [
+      "1.1.1.1",
+      "9.9.9.9"
+    ]
+  },
+  "wan": {
+    "mode": "dhcp",
+    "interface": "wlp1s0",
+    "static": {
+      "address": "",
+      "gateway": "",
+      "dns": []
+    },
+    "pppoe": {
+      "username": "",
+      "password": ""
+    }
+  },
+  "wifi": {
+    "interface": "wlx80691a79f9eb",
+    "ssid": "RouterGeist",
+    "psk": "ChangeMe1234",
+    "country": "US",
+    "channel": 1,
+    "guest_enabled": false,
+    "guest_ssid": "RouterGeist-Guest",
+    "guest_psk": "ChangeMe1234"
+  },
+  "forwards": [],
+  "dhcp_reservations": [],
+  "dns_overrides": []
+}

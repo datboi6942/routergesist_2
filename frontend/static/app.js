@@ -83,11 +83,17 @@ async function init(){
   await loadThreats();
   await loadTraffic();
   await loadDomains();
+  await loadTopDomains();
+  await loadSummary();
+  await loadConnections();
   await refreshBlocklist();
   setInterval(()=>isTabActive('interfaces')&&loadInterfaces(), 5000);
   setInterval(()=>isTabActive('security')&&loadThreats(), 7000);
   setInterval(()=>isTabActive('analytics')&&loadTraffic(), 4000);
   setInterval(()=>isTabActive('analytics')&&loadDomains(), 8000);
+  setInterval(()=>isTabActive('analytics')&&loadTopDomains(), 10000);
+  setInterval(()=>isTabActive('analytics')&&loadSummary(), 6000);
+  setInterval(()=>isTabActive('analytics')&&loadConnections(), 12000);
   setInterval(()=>isTabActive('security')&&refreshBlocklist(), 8000);
   setupTabs();
   // Bind buttons to avoid inline handlers (CSP safe)
@@ -110,6 +116,48 @@ async function loadOpenAIState(){
     const s = await api('/api/settings/openai');
     const stateEl = document.getElementById('openaiState');
     if(stateEl) stateEl.textContent = s.configured ? 'Configured' : 'Not configured';
+  }catch{}
+}
+
+async function loadTopDomains(){
+  try{
+    const data = await api('/api/stats/top-domains');
+    const el = document.getElementById('topDomains'); if(!el) return;
+    el.innerHTML = '';
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Domain</th><th>Queries</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    (data.items||[]).forEach(([dom,count])=>{ const tr = document.createElement('tr'); tr.innerHTML = `<td>${dom}</td><td>${count}</td>`; tbody.appendChild(tr); });
+    table.appendChild(tbody); el.appendChild(table);
+  }catch{}
+}
+
+async function loadSummary(){
+  try{
+    const data = await api('/api/stats/summary');
+    const el = document.getElementById('summary'); if(!el) return;
+    el.innerHTML='';
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>NIC</th><th>Role</th><th>RX (KB/s)</th><th>TX (KB/s)</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    const per = data.pernic||{}; Object.keys(per).forEach(n=>{
+      const r = per[n]; const tr = document.createElement('tr');
+      const rx = (r.rx_bps/1024).toFixed(1); const tx=(r.tx_bps/1024).toFixed(1);
+      tr.innerHTML = `<td>${n}</td><td>${r.role}</td><td>${rx}</td><td>${tx}</td>`; tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); el.appendChild(table);
+  }catch{}
+}
+
+async function loadConnections(){
+  try{
+    const data = await api('/api/stats/connections');
+    const el = document.getElementById('connections'); if(!el) return;
+    el.innerHTML='';
+    const row = document.createElement('div'); row.className='row wrap gap-16';
+    const a = document.createElement('div'); a.innerHTML='<h3 class="m-0">Top Clients</h3>'; const at = document.createElement('table'); at.innerHTML='<thead><tr><th>Client</th><th>Conns</th></tr></thead>'; const atb=document.createElement('tbody'); (data.top_clients||[]).forEach(([ip,c])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${ip}</td><td>${c}</td>`; atb.appendChild(tr); }); at.appendChild(atb); a.appendChild(at);
+    const b = document.createElement('div'); b.innerHTML='<h3 class="m-0">Top Dest Ports</h3>'; const bt = document.createElement('table'); bt.innerHTML='<thead><tr><th>Port</th><th>Conns</th></tr></thead>'; const btb=document.createElement('tbody'); (data.top_dest_ports||[]).forEach(([p,c])=>{ const tr=document.createElement('tr'); tr.innerHTML=`<td>${p}</td><td>${c}</td>`; btb.appendChild(tr); }); bt.appendChild(btb); b.appendChild(bt);
+    row.appendChild(a); row.appendChild(b); el.appendChild(row);
   }catch{}
 }
 
