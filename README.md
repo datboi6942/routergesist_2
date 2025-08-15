@@ -7,7 +7,15 @@ Overview
 - Guarded "Nuke" operation to securely shred app data and reset state
 
 Status
-- Initial scaffold. AP/WAN bring-up uses system tools (`nmcli`, `hostapd`, `dnsmasq`) if present; defaults to safe no-op with logs if not configured.
+- AP/WAN bring-up is container-friendly and host-friendly:
+  - In container, startup applies router config and launches `hostapd`/`dnsmasq` directly (no systemd), with hot-reload volumes.
+  - On host, privileged operations are delegated to scripts.
+- Dynamic interface roles:
+  - Detects default-route interface for WAN; picks a different wireless NIC for AP automatically.
+- Live monitoring (Analytics tab):
+  - Dual charts show WAN and LAN/AP RX/TX for the last 60 minutes (1–2 s latency), minute ticks, 5‑min labels, and legends.
+  - DNS analytics: visited domains, top domains, top domains by client, new domains (last hour).
+  - Connections: top clients/destination ports; per‑device activity classifier (streaming/download/idle) via conntrack + DNS.
 - Threat detection integrates with OpenAI-compatible API if `OPENAI_API_KEY` is set.
 
 Hardware/OS
@@ -43,8 +51,9 @@ Quick Start (Development)
 
 2) Frontend
    - Static assets are served by the backend at `/`.
+   - Open `http://localhost:8080/` (or your host) → Analytics for live charts.
 
-Production Setup (RPi)
+Production Setup (RPi or Container)
 - Create a dedicated user:
   ```bash
   sudo useradd --system --home /opt/routergeist --shell /usr/sbin/nologin routergeist
@@ -66,7 +75,7 @@ Production Setup (RPi)
   routergeist ALL=(root) NOPASSWD:SETENV: /bin/bash /opt/routergeist/scripts/privileged/nuke.sh *, \
                                          /bin/bash /opt/routergeist/scripts/privileged/assign_roles.sh *
   ```
-- Install systemd units (see `systemd/`):
+- Install systemd units (see `systemd/`) when running on host:
   ```bash
   sudo cp -r systemd/* /etc/systemd/system/
   sudo systemctl daemon-reload
@@ -96,6 +105,11 @@ Interface Roles
   - Prefer assigning one to WAN (connecting to preferred SSIDs) and one to AP
 - If a single Wi‑Fi NIC is present:
   - Prefer WAN if preferred SSIDs are reachable and credentials exist; else run AP
+
+Traffic Charts (UX)
+- WAN chart auto-binds to the current WAN NIC (highest recent RX or `role==WAN`).
+- LAN/AP chart auto-binds to the AP NIC (highest recent TX or `role==LAN`).
+- 60‑minute rolling window with 1‑minute ticks and 5‑minute labels; legend clarifies RX (download) and TX (upload).
 
 Threat Detection
 - Streams network/system events (extensible) into an LLM for heuristic analysis.
