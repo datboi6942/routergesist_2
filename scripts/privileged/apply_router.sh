@@ -86,14 +86,16 @@ log-queries
 log-facility=/var/log/dnsmasq.log
 # Default gateway and DNS options
 dhcp-option=3,$LAN_IP
+dhcp-option=6,$LAN_IP
 EOF
 
-# Append DNS servers for clients if configured
+# Upstream DNS servers (for dnsmasq to forward to)
 if [[ -n "$LAN_DNS" && "$LAN_DNS" != "null" && "$LAN_DNS" != "" ]]; then
   IFS=',' read -r -a DNS_ARR <<< "$LAN_DNS"
-  echo -n "dhcp-option=6" >> /etc/routergeist/dnsmasq.conf
-  for d in "${DNS_ARR[@]}"; do echo -n ",$d" >> /etc/routergeist/dnsmasq.conf; done
-  echo >> /etc/routergeist/dnsmasq.conf
+  for d in "${DNS_ARR[@]}"; do echo "server=$d" >> /etc/routergeist/dnsmasq.conf; done
+else
+  echo "server=1.1.1.1" >> /etc/routergeist/dnsmasq.conf
+  echo "server=9.9.9.9" >> /etc/routergeist/dnsmasq.conf
 fi
 
 # Append DHCP reservations

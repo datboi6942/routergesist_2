@@ -32,7 +32,8 @@ class StatsService:
         prev = psutil.net_io_counters(pernic=True)
         prev_ts = time.time()
         while not self._stop.is_set():
-            await asyncio.sleep(1)
+            # Sample at 2 Hz for smoother frontend graphs
+            await asyncio.sleep(0.5)
             now_ts = time.time()
             now = psutil.net_io_counters(pernic=True)
             dt = max(1e-3, now_ts - prev_ts)
@@ -42,7 +43,8 @@ class StatsService:
                         continue
                     rx_rate = (counters.bytes_recv - prev[nic].bytes_recv) / dt
                     tx_rate = (counters.bytes_sent - prev[nic].bytes_sent) / dt
-                    dq = self._history.setdefault(nic, deque(maxlen=self._window_seconds))
+                    # Keep enough capacity for higher sample rate; trimming by time below
+                    dq = self._history.setdefault(nic, deque(maxlen=int(self._window_seconds * 6)))
                     dq.append((now_ts, rx_rate, tx_rate))
                 # Trim old points beyond window (in case maxlen not sufficient)
                 cutoff = now_ts - self._window_seconds

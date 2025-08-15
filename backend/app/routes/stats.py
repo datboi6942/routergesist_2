@@ -91,3 +91,36 @@ async def connections() -> Dict[str, Any]:
         return {"error": str(exc)}
 
 
+@router.get("/top-domains-by-client", dependencies=[Depends(require_auth)])
+async def top_domains_by_client(limit: int = 10, window_seconds: int = 600) -> Dict[str, Any]:
+    data = await dns_monitor.get_top_by_client(window_seconds=window_seconds, limit=limit)
+    return {"by_client": data}
+
+
+@router.get("/new-domains", dependencies=[Depends(require_auth)])
+async def new_domains(window_seconds: int = 3600) -> Dict[str, Any]:
+    items = await dns_monitor.get_new_domains(window_seconds=window_seconds)
+    return {"items": items}
+
+
+@router.get("/clients-usage", dependencies=[Depends(require_auth)])
+async def clients_usage() -> Dict[str, Any]:
+    try:
+        p = subprocess.run(["ss", "-ntu"], capture_output=True, text=True, check=False)
+        lines = p.stdout.splitlines()
+        per_src: Dict[str, int] = {}
+        for ln in lines[1:]:
+            parts = ln.split()
+            if len(parts) < 5:
+                continue
+            local = parts[4]
+            l_ip, _ = local.rsplit(":", 1)
+            if l_ip.startswith("[") and "]" in l_ip:
+                l_ip = l_ip.strip("[]")
+            per_src[l_ip] = per_src.get(l_ip, 0) + 1
+        items = sorted(per_src.items(), key=lambda kv: kv[1], reverse=True)
+        return {"active_connections_by_client": items}
+    except Exception as exc:  # noqa: BLE001
+        return {"error": str(exc)}
+
+

@@ -19,6 +19,7 @@ main{padding:0}
 .tab-pane{display:none; gap:16px; padding:16px; grid-template-columns:repeat(auto-fit, minmax(340px,1fr))}
 .tab-pane.active{display:grid}
 .card{background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px}
+.card-traffic{ grid-column: 1 / -1 }
 .card h2{margin-top:0}
 .muted{color:var(--muted)}
 table{width:100%; border-collapse:collapse; table-layout:auto}
@@ -33,6 +34,8 @@ th,td{padding:8px; border-bottom:1px solid var(--border); text-align:left}
 .mt-10{margin-top:10px}
 .justify-between{justify-content:space-between}
 .m-0{margin:0}
+.flex-1{flex:1}
+#trafficChart{width:100%; display:block}
 .flex-1{flex:1}
 .pre-wrap{white-space:pre-wrap}
 .row.wrap{flex-wrap:wrap}

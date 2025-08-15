@@ -11,7 +11,8 @@ from ..utils.paths import get_app_data_dir
 
 RESOLVED_LOG = "/var/log/dnsmasq.log"  # common path if using dnsmasq logging
 ALT_JOURNALCTL = ["journalctl", "-u", "systemd-resolved", "-o", "cat", "-f"]
-DOMAIN_RE = re.compile(r"query\[[A-Z]+\]\s+([a-zA-Z0-9_.-]+)")
+# Example: "query[A] example.com from 192.168.50.51"
+DOMAIN_RE = re.compile(r"query\[[A-Z]+\]\s+([a-zA-Z0-9_.-]+)\s+from\s+([0-9a-fA-F:.]+)")
 
 
 class DNSMonitor:
@@ -19,7 +20,8 @@ class DNSMonitor:
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._lock = asyncio.Lock()
-        self._visited: Deque[Tuple[float, str]] = deque(maxlen=2000)
+        self._visited: Deque[Tuple[float, str, str]] = deque(maxlen=5000)
+        self._first_seen: Dict[str, float] = {}
 
     async def start(self) -> None:
         if self._task and not self._task.done():
@@ -55,14 +57,52 @@ class DNSMonitor:
                     m = DOMAIN_RE.search(line)
                     if m:
                         domain = m.group(1).lower()
+                        client = m.group(2)
+                        now = time.time()
                         async with self._lock:
-                            self._visited.append((time.time(), domain))
+                            self._visited.append((now, domain, client))
+                            if domain not in self._first_seen:
+                                self._first_seen[domain] = now
         except Exception:
             return
 
     async def get_recent(self, limit: int = 200) -> List[Tuple[float, str]]:
         async with self._lock:
-            return list(self._visited)[-limit:]
+            return [(ts, dom) for ts, dom, _ in list(self._visited)[-limit:]]
+
+    async def get_recent_by_client(self, window_seconds: int = 600) -> Dict[str, List[Tuple[str, float]]]:
+        import time
+        cutoff = time.time() - window_seconds
+        out: Dict[str, List[Tuple[str, float]]] = {}
+        async with self._lock:
+            for ts, dom, client in self._visited:
+                if ts < cutoff:
+                    continue
+                out.setdefault(client, []).append((dom, ts))
+        return out
+
+    async def get_top_by_client(self, window_seconds: int = 600, limit: int = 10) -> Dict[str, List[Tuple[str, int]]]:
+        import time
+        cutoff = time.time() - window_seconds
+        counts: Dict[str, Dict[str, int]] = {}
+        async with self._lock:
+            for ts, dom, client in self._visited:
+                if ts < cutoff:
+                    continue
+                bucket = counts.setdefault(client, {})
+                bucket[dom] = bucket.get(dom, 0) + 1
+        top: Dict[str, List[Tuple[str, int]]] = {}
+        for client, m in counts.items():
+            items = sorted(m.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+            top[client] = items
+        return top
+
+    async def get_new_domains(self, window_seconds: int = 3600) -> List[Tuple[float, str]]:
+        import time
+        cutoff = time.time() - window_seconds
+        async with self._lock:
+            items = [(ts, dom) for dom, ts in self._first_seen.items() if ts >= cutoff]
+        return sorted(items, key=lambda x: x[0], reverse=True)
 
 
 dns_monitor = DNSMonitor()

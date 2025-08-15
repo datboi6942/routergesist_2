@@ -81,19 +81,23 @@ async function init(){
   await loadOpenAIState();
   await loadInterfaces();
   await loadThreats();
-  await loadTraffic();
+  await startTrafficChart();
   await loadDomains();
   await loadTopDomains();
   await loadSummary();
   await loadConnections();
+  await loadTopDomainsByClient();
+  await loadNewDomains();
   await refreshBlocklist();
   setInterval(()=>isTabActive('interfaces')&&loadInterfaces(), 5000);
   setInterval(()=>isTabActive('security')&&loadThreats(), 7000);
-  setInterval(()=>isTabActive('analytics')&&loadTraffic(), 4000);
+  // traffic chart is animated via requestAnimationFrame; no interval needed
   setInterval(()=>isTabActive('analytics')&&loadDomains(), 8000);
   setInterval(()=>isTabActive('analytics')&&loadTopDomains(), 10000);
   setInterval(()=>isTabActive('analytics')&&loadSummary(), 6000);
   setInterval(()=>isTabActive('analytics')&&loadConnections(), 12000);
+  setInterval(()=>isTabActive('analytics')&&loadTopDomainsByClient(), 12000);
+  setInterval(()=>isTabActive('analytics')&&loadNewDomains(), 30000);
   setInterval(()=>isTabActive('security')&&refreshBlocklist(), 8000);
   setupTabs();
   // Bind buttons to avoid inline handlers (CSP safe)
@@ -161,6 +165,33 @@ async function loadConnections(){
   }catch{}
 }
 
+async function loadTopDomainsByClient(){
+  try{
+    const data = await api('/api/stats/top-domains-by-client');
+    const el = document.getElementById('topDomainsByClient'); if(!el) return;
+    el.innerHTML='';
+    const table = document.createElement('table');
+    table.innerHTML = '<thead><tr><th>Client</th><th>Top Domains</th></tr></thead>';
+    const tbody = document.createElement('tbody');
+    const byc = data.by_client||{}; Object.keys(byc).forEach(client=>{
+      const items = byc[client].map(([d,c])=>`${d} (${c})`).join(', ');
+      const tr=document.createElement('tr'); tr.innerHTML=`<td>${client}</td><td>${items}</td>`; tbody.appendChild(tr);
+    });
+    table.appendChild(tbody); el.appendChild(table);
+  }catch{}
+}
+
+async function loadNewDomains(){
+  try{
+    const data = await api('/api/stats/new-domains');
+    const el = document.getElementById('newDomains'); if(!el) return;
+    el.innerHTML='';
+    const list = document.createElement('ul');
+    (data.items||[]).slice(0,50).forEach(([ts,dom])=>{ const li=document.createElement('li'); li.textContent=`${new Date(ts*1000).toLocaleTimeString()} — ${dom}`; list.appendChild(li); });
+    el.appendChild(list);
+  }catch{}
+}
+
 async function saveOpenAIKey(){
   const key = document.getElementById('openaiKey').value;
   const msg = document.getElementById('settingsMsg');
@@ -191,38 +222,62 @@ window.changePassword = changePassword;
 
 init();
 
-// Simple traffic chart (no external deps): draw last points for first NIC
-async function loadTraffic(){
-  try{
-    const data = await api('/api/stats/traffic');
-    const pernic = data.pernic || {};
-    const nics = Object.keys(pernic);
-    if(nics.length===0) return;
-    const nic = nics[0];
-    const points = pernic[nic].slice(-120); // last 2 minutes
-    const cvs = document.getElementById('trafficChart');
-    if(!cvs) return;
-    const ctx = cvs.getContext('2d');
-    const w = cvs.width = cvs.clientWidth; const h = cvs.height = 140;
+// Smooth animated traffic chart (no external deps)
+let __traffic = {buffer: [], nic: null, lastFetch: 0};
+async function startTrafficChart(){
+  const cvs = document.getElementById('trafficChart'); if(!cvs) return;
+  const ctx = cvs.getContext('2d');
+  async function fetchData(){
+    try{
+      const data = await api('/api/stats/traffic');
+      const pernic = data.pernic || {}; const nics = Object.keys(pernic);
+      if(nics.length===0) return;
+      if(!__traffic.nic) __traffic.nic = nics[0];
+      const points = pernic[__traffic.nic] || [];
+      __traffic.buffer = points.slice(-300); // last 5 minutes at 1Hz
+      __traffic.lastFetch = performance.now();
+    }catch{}
+  }
+  function draw(){
+    const w = cvs.width = cvs.clientWidth; const h = cvs.height = 220;
     ctx.clearRect(0,0,w,h);
-    const rx = points.map(p=>p[1]);
-    const tx = points.map(p=>p[2]);
+    const pts = __traffic.buffer;
+    if(pts.length<2){ requestAnimationFrame(draw); return; }
+    const now = performance.now();
+    const rx = pts.map(p=>p[1]); const tx = pts.map(p=>p[2]);
     const max = Math.max(1, ...rx, ...tx);
-    const step = w / Math.max(1, points.length-1);
-    const scale = (v)=> h - (v/max)*(h-20) - 10;
-    // grid
+    const duration = Math.max(1, pts[pts.length-1][0]-pts[0][0]);
+    const xForTs = (ts)=>{
+      const t0 = pts[0][0]; const t1 = pts[pts.length-1][0];
+      return ((ts - t0) / (t1 - t0)) * w;
+    };
+    const yForVal = (v)=> h - (v/max)*(h-20) - 10;
+    // grid and axes
     ctx.strokeStyle = '#2a2f3a'; ctx.lineWidth = 1; ctx.beginPath();
     for(let i=0;i<5;i++){ const y = (h-20)*i/4 + 10; ctx.moveTo(0,y); ctx.lineTo(w,y); }
     ctx.stroke();
-    // rx
+    // y-axis labels (KB/s)
+    ctx.fillStyle = '#7a8290'; ctx.font = '12px system-ui';
+    for(let i=0;i<=4;i++){ const val = (max*i/4)/1024; const y = (h-20)* (1 - i/4) + 10; ctx.fillText(val.toFixed(0)+' KB/s', 6, Math.max(12, Math.min(h-4, y-2))); }
+    // x-axis start/end times
+    const t0d = new Date(pts[0][0]*1000).toLocaleTimeString();
+    const t1d = new Date(pts[pts.length-1][0]*1000).toLocaleTimeString();
+    ctx.fillText(t0d, 6, h-4);
+    ctx.fillText(t1d, w-80, h-4);
+    // rx line
     ctx.strokeStyle = '#5b9cff'; ctx.lineWidth = 2; ctx.beginPath();
-    points.forEach((p,i)=>{ const x = i*step; const y = scale(p[1]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    pts.forEach((p,i)=>{ const x = xForTs(p[0]); const y = yForVal(p[1]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
     ctx.stroke();
-    // tx
+    // tx line
     ctx.strokeStyle = '#9cff9c'; ctx.lineWidth = 2; ctx.beginPath();
-    points.forEach((p,i)=>{ const x = i*step; const y = scale(p[2]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
+    pts.forEach((p,i)=>{ const x = xForTs(p[0]); const y = yForVal(p[2]); if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y); });
     ctx.stroke();
-  }catch{}
+    requestAnimationFrame(draw);
+  }
+  // fetch every 500ms for smoother updates (backend samples ~2 Hz)
+  fetchData();
+  setInterval(fetchData, 500);
+  requestAnimationFrame(draw);
 }
 
 function setupTabs(){
