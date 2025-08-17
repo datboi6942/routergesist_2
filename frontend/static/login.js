@@ -1,5 +1,5 @@
 async function api(path, opts={}){
-  const res = await fetch(path, { ...opts, headers: { 'Content-Type': 'application/json', ...(opts.headers||{}) } });
+  const res = await fetch(path, { ...opts, credentials: 'include', headers: { 'Content-Type': 'application/json', ...(opts.headers||{}) } });
   if(!res.ok) throw new Error(await res.text());
   return res.json();
 }

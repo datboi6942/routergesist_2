@@ -140,6 +140,8 @@ tbody tr{transition:background var(--t-fast) ease}
 tbody tr:hover{background:rgba(120,166,255,.06)}
 
 canvas.traffic{border-radius:12px; background:linear-gradient(180deg, rgba(23,27,43,.7), rgba(18,22,36,.6)); border:1px solid rgba(72,96,138,.35); box-shadow:inset 0 0 0 1px rgba(255,255,255,.02), 0 8px 18px rgba(0,0,0,.35)}
+/* Ensure canvases are sized by CSS for DPR scaling in JS */
+canvas.traffic{ width:100%; height:240px; display:block }
 
 button{border:1px solid rgba(72,96,138,.45); background:linear-gradient(180deg, rgba(40,46,72,.9), rgba(30,36,62,.9)); border-radius:10px; transition:transform var(--t-fast) ease, box-shadow var(--t-fast) ease, border-color var(--t-fast) ease, background var(--t-fast) ease}
 button:hover{transform:translateY(-1px); box-shadow:0 10px 24px rgba(0,0,0,.35); border-color:rgba(120,166,255,.5); background:linear-gradient(180deg, rgba(46,54,86,.95), rgba(34,40,70,.95))}
@@ -189,4 +191,38 @@ input:focus{outline:none; border-color:rgba(120,166,255,.6); box-shadow:0 0 0 3p
 #clientsByDomain table{ table-layout:auto; min-width:900px }
 #clientsByDomain th:nth-child(1), #clientsByDomain td:nth-child(1){ width:auto; white-space:nowrap; overflow:visible; text-overflow:initial }
 #clientsByDomain th:nth-child(2), #clientsByDomain td:nth-child(2){ white-space:normal; word-break:break-word }
+
+/* =============================
+   Mobile responsiveness
+   ============================= */
+@media (max-width: 720px){
+  body{ font-size:15px; padding-bottom: env(safe-area-inset-bottom, 0) }
+  header{ padding:12px 16px; padding-top: calc(12px + env(safe-area-inset-top, 0)) }
+  footer{ padding:12px 16px }
+
+  .tabs{ overflow-x:auto; white-space:nowrap; -webkit-overflow-scrolling:touch }
+  .tab{ flex:0 0 auto; padding:10px 12px; font-size:14px }
+  .tabs::-webkit-scrollbar{ height:6px }
+
+  .tab-pane{ grid-template-columns:1fr; padding:12px; gap:12px }
+  .card{ padding:12px; border-radius:10px }
+
+  /* Taller, readable charts on phones */
+  canvas.traffic{ height:200px; margin-bottom:10px }
+  #lt24,#lt7d{ height:200px }
+
+  /* Stack form fields vertically */
+  .field{ flex-direction:column; align-items:stretch }
+  .field label{ width:auto; margin-bottom:4px }
+  .row{ gap:8px; flex-wrap:wrap }
+  .row.wrap > *{ flex:1 1 100% }
+  .row.wrap input{ min-width:120px }
+
+  /* Make wide tables scrollable */
+  table{ display:block; overflow:auto; -webkit-overflow-scrolling:touch }
+  th,td{ white-space:nowrap; font-size:14px }
+
+  /* Interface actions align left on small screens */
+  .iface-table .table-actions{ justify-content:flex-start }
+}
 

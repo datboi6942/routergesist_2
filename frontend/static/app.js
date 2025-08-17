@@ -121,6 +121,7 @@ async function init(){
   const svcRefresh = document.getElementById('svcRefreshBtn'); if(svcRefresh) svcRefresh.addEventListener('click', loadServices);
   const svcDns = document.getElementById('svcRestartDnsmasq'); if(svcDns) svcDns.addEventListener('click', ()=>ctlSvc('dnsmasq','restart'));
   const svcAp = document.getElementById('svcRestartHostapd'); if(svcAp) svcAp.addEventListener('click', ()=>ctlSvc('hostapd','restart'));
+  const logoutBtn = document.getElementById('logoutBtn'); if(logoutBtn) logoutBtn.addEventListener('click', logoutNow);
   await loadRouterConfig();
   await loadServices();
 }
@@ -287,12 +288,16 @@ async function startTrafficChart(){
   // ensure device pixel ratio scaling for crisp lines
   function scaleCanvas(cvs, ctx){
     if(!cvs || !ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const cssW = cvs.clientWidth || 600;
-    const cssH = cvs.clientHeight || 220;
-    if(cvs.width !== Math.floor(cssW*dpr)){
-      cvs.width = Math.floor(cssW*dpr);
-      cvs.height = Math.floor(cssH*dpr);
+    const dpr = Math.max(1, Math.min(2, (window.devicePixelRatio || 1)));
+    // Use bounding box to be more reliable on mobile when canvas has no explicit width/height attributes
+    const rect = cvs.getBoundingClientRect();
+    const cssW = Math.max(320, Math.floor(rect.width));
+    const cssH = Math.max(180, Math.floor(rect.height || 220));
+    const targetW = Math.floor(cssW * dpr);
+    const targetH = Math.floor(cssH * dpr);
+    if(cvs.width !== targetW || cvs.height !== targetH){
+      cvs.width = targetW;
+      cvs.height = targetH;
       ctx.setTransform(dpr,0,0,dpr,0,0);
     }
   }
@@ -795,6 +800,14 @@ async function saveField(el){
   const path = el.dataset.path.split('.'); const value = el.tagName==='SELECT' ? el.value : el.value;
   await api('/api/router/config', { method:'POST', body: JSON.stringify({ path, value }) });
   await loadRouterConfig();
+}
+
+async function logoutNow(){
+  try{
+    await api('/api/auth/logout', { method:'POST' });
+  }catch{}
+  // Always redirect to login to clear any local state
+  location.href = '/static/login.html';
 }
 
 async function loadDomains(){

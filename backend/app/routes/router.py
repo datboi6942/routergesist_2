@@ -9,6 +9,8 @@ from ..security.auth import require_auth
 from ..services.router_config_store import router_config_store
 from ..services.router_apply import apply_router_config
 import subprocess
+import os
+import shutil
 
 
 router = APIRouter()
@@ -65,13 +67,40 @@ SERVICE_NAMES = {
 
 @router.get("/services", dependencies=[Depends(require_auth)])
 async def services_status() -> Dict[str, Any]:
-    status = {}
+    """Return service status for key router components.
+
+    Container-friendly: falls back to process and nftables checks when systemd
+    is not available inside the environment.
+    """
+    status: Dict[str, str] = {}
+
+    has_systemd = os.path.isdir("/run/systemd/system") and bool(shutil.which("systemctl"))
+
     for name in SERVICE_NAMES:
         try:
-            p = subprocess.run(["systemctl", "is-active", name], capture_output=True, text=True, check=False)
-            status[name] = p.stdout.strip() or p.stderr.strip()
+            if has_systemd:
+                p = subprocess.run(["systemctl", "is-active", name], capture_output=True, text=True, check=False)
+                status[name] = p.stdout.strip() or p.stderr.strip()
+                continue
+
+            # Container mode fallbacks (no systemd):
+            if name in {"dnsmasq", "routergeist-dnsmasq"}:
+                p = subprocess.run(["pgrep", "-x", "dnsmasq"], capture_output=True, text=True)
+                status[name] = "active" if p.returncode == 0 else "inactive"
+            elif name in {"hostapd", "routergeist-hostapd"}:
+                p = subprocess.run(["pgrep", "-x", "hostapd"], capture_output=True, text=True)
+                status[name] = "active" if p.returncode == 0 else "inactive"
+            elif name == "nftables":
+                p = subprocess.run(["nft", "list", "tables"], capture_output=True, text=True)
+                if p.returncode == 0 and ("routergeist_filter" in p.stdout or "routergeist_nat" in p.stdout):
+                    status[name] = "active"
+                else:
+                    status[name] = "inactive"
+            else:
+                status[name] = "unknown"
         except Exception as exc:  # noqa: BLE001
             status[name] = f"error: {exc}"
+
     return {"status": status}
 
 
@@ -81,7 +110,33 @@ async def services_ctl(name: str, action: str) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="Unknown service")
     if action not in {"start", "stop", "restart", "enable", "disable"}:
         raise HTTPException(status_code=400, detail="Invalid action")
-    p = subprocess.run(["sudo", "systemctl", action, name], capture_output=True, text=True, check=False)
-    return {"ok": p.returncode == 0, "out": (p.stdout or "") + (p.stderr or "")}
+    has_systemd = os.path.isdir("/run/systemd/system") and bool(shutil.which("systemctl"))
+
+    if has_systemd:
+        p = subprocess.run(["sudo", "systemctl", action, name], capture_output=True, text=True, check=False)
+        return {"ok": p.returncode == 0, "out": (p.stdout or "") + (p.stderr or "")}
+
+    # Container mode control: reuse apply_router_config for (re)starts
+    try:
+        if action in {"start", "restart"}:
+            out = apply_router_config()
+            return {"ok": True, "out": out}
+        if action == "stop":
+            if name in {"dnsmasq", "routergeist-dnsmasq"}:
+                subprocess.run(["pkill", "-x", "dnsmasq"], capture_output=True)
+                return {"ok": True, "out": "dnsmasq stopped"}
+            if name in {"hostapd", "routergeist-hostapd"}:
+                subprocess.run(["pkill", "-x", "hostapd"], capture_output=True)
+                return {"ok": True, "out": "hostapd stopped"}
+            if name == "nftables":
+                # Best-effort cleanup of routergeist tables
+                subprocess.run(["nft", "delete", "table", "inet", "routergeist_filter"], capture_output=True)
+                subprocess.run(["nft", "delete", "table", "ip", "routergeist_nat"], capture_output=True)
+                return {"ok": True, "out": "nftables rules removed"}
+            return {"ok": False, "out": "stop not supported for this service in container mode"}
+        # enable/disable not applicable without systemd
+        return {"ok": False, "out": "enable/disable not supported in container mode"}
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=500, detail=str(exc))
 
 

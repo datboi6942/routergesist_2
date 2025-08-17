@@ -26,11 +26,11 @@
     }
   },
   "wifi": {
-    "interface": "wlx80691a79f9eb",
-    "ssid": "RouterGeist",
+    "interface": "wlx1459c02f9df6",
+    "ssid": "RG2-Test",
     "psk": "ChangeMe1234",
     "country": "US",
-    "channel": 1,
+    "channel": 6,
     "guest_enabled": false,
     "guest_ssid": "RouterGeist-Guest",
     "guest_psk": "ChangeMe1234"

@@ -58,15 +58,21 @@ nft add table ip routergeist_nat 2>/dev/null || true
 nft add chain ip routergeist_nat prerouting '{ type nat hook prerouting priority -100; }' 2>/dev/null || true
 nft add chain ip routergeist_nat postrouting '{ type nat hook postrouting priority 100; }' 2>/dev/null || true
 
+# Ensure idempotent rules: flush our chains before re-adding to avoid duplicates
+nft flush chain inet routergeist_filter input 2>/dev/null || true
+nft flush chain inet routergeist_filter forward 2>/dev/null || true
+nft flush chain ip routergeist_nat postrouting 2>/dev/null || true
+
 # 3b) Lock down admin panel to AP network only
 # Determine admin port (default 8080)
 ADMIN_PORT=$(jq -r '.admin.port' "$CFG_JSON" 2>/dev/null || echo "")
 if [[ -z "$ADMIN_PORT" || "$ADMIN_PORT" == "null" ]]; then ADMIN_PORT=8080; fi
 # Always allow loopback traffic
 nft add rule inet routergeist_filter input iif lo accept || true
-# Allow admin access only from the AP/LAN interface
+# Allow admin access from LAN subnet and from the selected AP/LAN interface
+nft add rule inet routergeist_filter input tcp dport $ADMIN_PORT ip saddr $LAN_CIDR accept || true
 nft add rule inet routergeist_filter input iif "$LAN_EDGE_IF" tcp dport $ADMIN_PORT accept || true
-# Drop admin access from any other interface (e.g., WAN)
+# Drop admin access from any other source (e.g., WAN)
 nft add rule inet routergeist_filter input tcp dport $ADMIN_PORT drop || true
 
 # 4) Masquerade from LAN to WAN

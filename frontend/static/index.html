@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Router Geist 2</title>
   <link rel="stylesheet" href="/static/style.css" />
   <script defer src="/static/app.js"></script>
@@ -128,6 +128,14 @@
             <div id="pwMsg" class="muted"></div>
           </div>
           <div id="settingsMsg" class="muted"></div>
+          <hr style="border:0;border-top:1px solid var(--border);width:100%" />
+          <div>
+            <label class="muted">Session</label>
+            <div class="row">
+              <button id="logoutBtn">Log out</button>
+              <small class="muted">Clears this device's session cookie.</small>
+            </div>
+          </div>
         </div>
       </section>
     </div>
